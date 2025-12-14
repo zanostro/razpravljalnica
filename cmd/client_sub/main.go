@@ -35,6 +35,8 @@ func main() {
 		log.Fatal(err)
 	}
 
+	fmt.Println("SUB TOPIC ID:", t.Id)
+
 	// cluster state (ni nujno, samo za test)
 	state, err := cp.GetClusterState(ctx, &emptypb.Empty{})
 	if err != nil {
