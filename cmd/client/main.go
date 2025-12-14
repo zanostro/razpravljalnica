@@ -115,4 +115,13 @@ func main() {
 	}
 	fmt.Println("Cluster:", "head=", state.Head.Address, "tail=", state.Tail.Address)
 
+	sub, err := c.GetSubscriptionNode(ctx, &pb.SubscriptionNodeRequest{
+		UserId:  u.Id,
+		TopicId: []int64{t.Id},
+	})
+	if err != nil {
+		log.Fatal("GetSubscriptionNode:", err)
+	}
+	fmt.Println("SubNode:", sub.Node.Address, "token=", sub.SubscribeToken)
+
 }
