@@ -52,6 +52,16 @@ func main() {
 		log.Fatal("LikeMessage:", err)
 	}
 
+	_, err = c.UpdateMessage(ctx, &pb.UpdateMessageRequest{
+		TopicId:   t.Id,
+		UserId:    u.Id,
+		MessageId: posted.Id,
+		Text:      "edited text",
+	})
+	if err != nil {
+		log.Fatal("UpdateMessage:", err)
+	}
+
 	msgs, err := c.GetMessages(ctx, &pb.GetMessagesRequest{
 		TopicId:       t.Id,
 		FromMessageId: 0,

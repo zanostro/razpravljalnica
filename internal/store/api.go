@@ -68,12 +68,31 @@ func (s *Store) PostMessage(topicID, userID int64, text string) (Message, error)
 	return m, nil
 }
 
-func (s *Store) UpdateMessage(topicID, messageID, userID int64, content string) (Message, error) {
+func (s *Store) UpdateMessage(topicID, messageID, userID int64, text string) (Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// TODO implement
-	return Message{}, nil
+	if text == "" {
+		return Message{}, ErrBadRequest
+	}
+	if _, ok := s.users[userID]; !ok {
+		return Message{}, ErrNotFound
+	}
+	if _, ok := s.topics[topicID]; !ok {
+		return Message{}, ErrNotFound
+	}
+
+	key := MsgKey{TopicID: topicID, MessageID: messageID}
+	pm, ok := s.messages[key]
+	if !ok {
+		return Message{}, ErrNotFound
+	}
+	if pm.UserID != userID {
+		return Message{}, ErrForbidden
+	}
+
+	pm.Text = text
+	return *pm, nil
 }
 
 func (s *Store) DeleteMessage(topicID, messageID, userID int64) (Message, error) {

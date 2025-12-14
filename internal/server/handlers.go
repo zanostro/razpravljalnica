@@ -74,8 +74,21 @@ func (s *Server) UpdateMessage(ctx context.Context, req *pb.UpdateMessageRequest
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "nil request")
 	}
-	_, _ = ctx, req
-	return nil, status.Error(codes.Unimplemented, "UpdateMessage not implemented yet")
+	_ = ctx
+
+	m, err := s.store.UpdateMessage(req.GetTopicId(), req.GetMessageId(), req.GetUserId(), req.GetText())
+	if err != nil {
+		return nil, grpcErr(err)
+	}
+
+	return &pb.Message{
+		Id:        m.ID,
+		TopicId:   m.TopicID,
+		UserId:    m.UserID,
+		Text:      m.Text,
+		CreatedAt: timestamppb.New(m.CreatedAt),
+		Likes:     m.Likes,
+	}, nil
 }
 
 func (s *Server) DeleteMessage(ctx context.Context, req *pb.DeleteMessageRequest) (*emptypb.Empty, error) {
