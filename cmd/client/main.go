@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"google.golang.org/grpc"
@@ -14,27 +15,73 @@ import (
 )
 
 func main() {
+	mode := "demo"
+	if len(os.Args) > 1 {
+		mode = os.Args[1]
+	}
+
 	conn, err := grpc.Dial("127.0.0.1:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer conn.Close()
 
-	c := pb.NewMessageBoardClient(conn)
+	mb := pb.NewMessageBoardClient(conn)
+	cp := pb.NewControlPlaneClient(conn)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	u, err := c.CreateUser(ctx, &pb.CreateUserRequest{Name: "ana"})
+	// shared setup
+	u, err := mb.CreateUser(ctx, &pb.CreateUserRequest{Name: "ana"})
 	if err != nil {
 		log.Fatal("CreateUser:", err)
 	}
-	t, err := c.CreateTopic(ctx, &pb.CreateTopicRequest{Name: "prva tema"})
+	t, err := mb.CreateTopic(ctx, &pb.CreateTopicRequest{Name: "prva tema"})
 	if err != nil {
 		log.Fatal("CreateTopic:", err)
 	}
 
-	posted, err := c.PostMessage(ctx, &pb.PostMessageRequest{
+	if mode == "sub" {
+		state, err := cp.GetClusterState(ctx, &emptypb.Empty{})
+		if err != nil {
+			log.Fatal("GetClusterState:", err)
+		}
+		fmt.Println("Cluster head/tail:", state.Head.Address, state.Tail.Address)
+
+		subNode, err := mb.GetSubscriptionNode(ctx, &pb.SubscriptionNodeRequest{
+			UserId:  u.Id,
+			TopicId: []int64{t.Id},
+		})
+		if err != nil {
+			log.Fatal("GetSubscriptionNode:", err)
+		}
+		fmt.Println("SubNode:", subNode.Node.Address, "token=", subNode.SubscribeToken)
+
+		stream, err := mb.SubscribeTopic(context.Background(), &pb.SubscribeTopicRequest{
+			TopicId:         []int64{t.Id},
+			UserId:          u.Id,
+			FromMessageId:   0,
+			SubscribeToken:  subNode.SubscribeToken,
+		})
+		if err != nil {
+			log.Fatal("SubscribeTopic:", err)
+		}
+		fmt.Println("Subscribed. Waiting for events...")
+
+		for {
+			ev, err := stream.Recv()
+			if err != nil {
+				log.Fatal("stream recv:", err)
+			}
+			fmt.Printf("EVENT seq=%d op=%s topic=%d msg=%d text=%q likes=%d\n",
+				ev.SequenceNumber, ev.Op.String(),
+				ev.Message.TopicId, ev.Message.Id, ev.Message.Text, ev.Message.Likes)
+		}
+	}
+
+	// demo mode: povzroči nekaj eventov
+	posted, err := mb.PostMessage(ctx, &pb.PostMessageRequest{
 		TopicId: t.Id,
 		UserId:  u.Id,
 		Text:    "hello world",
@@ -43,7 +90,7 @@ func main() {
 		log.Fatal("PostMessage:", err)
 	}
 
-	_, err = c.LikeMessage(ctx, &pb.LikeMessageRequest{
+	_, err = mb.LikeMessage(ctx, &pb.LikeMessageRequest{
 		TopicId:   t.Id,
 		MessageId: posted.Id,
 		UserId:    u.Id,
@@ -52,7 +99,7 @@ func main() {
 		log.Fatal("LikeMessage:", err)
 	}
 
-	_, err = c.UpdateMessage(ctx, &pb.UpdateMessageRequest{
+	_, err = mb.UpdateMessage(ctx, &pb.UpdateMessageRequest{
 		TopicId:   t.Id,
 		UserId:    u.Id,
 		MessageId: posted.Id,
@@ -62,27 +109,7 @@ func main() {
 		log.Fatal("UpdateMessage:", err)
 	}
 
-	msgs, err := c.GetMessages(ctx, &pb.GetMessagesRequest{
-		TopicId:       t.Id,
-		FromMessageId: 0,
-		Limit:         10,
-	})
-	if err != nil {
-		log.Fatal("GetMessages:", err)
-	}
-
-	fmt.Println("Topics:")
-	list, _ := c.ListTopics(ctx, &emptypb.Empty{})
-	for _, topic := range list.Topics {
-		fmt.Printf("- %d: %s\n", topic.Id, topic.Name)
-	}
-
-	fmt.Println("Messages:")
-	for _, m := range msgs.Messages {
-		fmt.Printf("- #%d (u=%d) [%s] %s likes=%d\n", m.Id, m.UserId, m.CreatedAt.AsTime().Format(time.RFC3339), m.Text, m.Likes)
-	}
-
-	_, err = c.DeleteMessage(ctx, &pb.DeleteMessageRequest{
+	_, err = mb.DeleteMessage(ctx, &pb.DeleteMessageRequest{
 		TopicId:   t.Id,
 		UserId:    u.Id,
 		MessageId: posted.Id,
@@ -91,37 +118,5 @@ func main() {
 		log.Fatal("DeleteMessage:", err)
 	}
 
-	// ponovno preberi messages po delete-u
-	msgs2, err := c.GetMessages(ctx, &pb.GetMessagesRequest{
-		TopicId:       t.Id,
-		FromMessageId: 0,
-		Limit:         10,
-	})
-	if err != nil {
-		log.Fatal("GetMessages after delete:", err)
-	}
-
-	fmt.Println("Messages after delete:")
-	for _, m := range msgs2.Messages {
-		fmt.Printf("- #%d (u=%d) [%s] %s likes=%d\n",
-			m.Id, m.UserId, m.CreatedAt.AsTime().Format(time.RFC3339), m.Text, m.Likes)
-	}
-
-	cp := pb.NewControlPlaneClient(conn)
-
-	state, err := cp.GetClusterState(ctx, &emptypb.Empty{})
-	if err != nil {
-		log.Fatal("GetClusterState:", err)
-	}
-	fmt.Println("Cluster:", "head=", state.Head.Address, "tail=", state.Tail.Address)
-
-	sub, err := c.GetSubscriptionNode(ctx, &pb.SubscriptionNodeRequest{
-		UserId:  u.Id,
-		TopicId: []int64{t.Id},
-	})
-	if err != nil {
-		log.Fatal("GetSubscriptionNode:", err)
-	}
-	fmt.Println("SubNode:", sub.Node.Address, "token=", sub.SubscribeToken)
-
+	fmt.Println("demo done")
 }
