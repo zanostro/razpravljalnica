@@ -1,0 +1,37 @@
+
+/bin/
+*.log
+.DS_Store
+
+# ===== Go build artifacts =====
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# ===== Logs =====
+*.log
+
+# ===== VS Code =====
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# ===== OS =====
+.DS_Store
+
+# ===== Temporary =====
+tmp/
+temp/
+*~
+*.swp
+*.swo
+
+/gen/**/*.tmp

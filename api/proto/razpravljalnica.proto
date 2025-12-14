@@ -1,0 +1,149 @@
+syntax = "proto3";
+
+package razpravljalnica;
+
+option go_package = "razpravljalnica/gen/pb;pb";
+
+import "google/protobuf/empty.proto";
+
+/* ===== ENUMS ===== */
+
+enum MessageOp {
+  MESSAGE_OP_UNSPECIFIED = 0;
+  MESSAGE_OP_CREATE = 1;
+  MESSAGE_OP_UPDATE = 2;
+  MESSAGE_OP_DELETE = 3;
+  MESSAGE_OP_LIKE = 4;
+}
+
+/* ===== BASIC TYPES ===== */
+
+message User {
+  int64 user_id = 1;
+  string username = 2;
+}
+
+message Topic {
+  int64 topic_id = 1;
+  string title = 2;
+}
+
+message Message {
+  int64 message_id = 1;
+  int64 topic_id = 2;
+  int64 user_id = 3;
+  string content = 4;
+  int64 likes = 5;
+}
+
+/* ===== EVENTS ===== */
+
+message MessageEvent {
+  int64 sequence_number = 1;
+  MessageOp op = 2;
+  Message message = 3;
+}
+
+/* ===== SUBSCRIPTION ===== */
+
+message SubscribeRequest {
+  int64 user_id = 1;
+  repeated int64 topic_ids = 2;
+  int64 from_message_id = 3;
+  string subscribe_token = 4;
+}
+
+/* ===== NODE INFO ===== */
+
+message NodeInfo {
+  string node_id = 1;
+  string address = 2;
+}
+
+/* ===== REQUEST / RESPONSE ===== */
+
+message CreateUserRequest {
+  string username = 1;
+}
+message CreateUserResponse {
+  User user = 1;
+}
+
+message CreateTopicRequest {
+  string title = 1;
+}
+message CreateTopicResponse {
+  Topic topic = 1;
+}
+
+message PostMessageRequest {
+  int64 topic_id = 1;
+  int64 user_id = 2;
+  string content = 3;
+}
+
+message UpdateMessageRequest {
+  int64 topic_id = 1;
+  int64 message_id = 2;
+  int64 user_id = 3;
+  string content = 4;
+}
+
+message DeleteMessageRequest {
+  int64 topic_id = 1;
+  int64 message_id = 2;
+  int64 user_id = 3;
+}
+
+message LikeMessageRequest {
+  int64 topic_id = 1;
+  int64 message_id = 2;
+  int64 user_id = 3;
+}
+
+message GetMessagesRequest {
+  int64 topic_id = 1;
+  int64 from_message_id = 2;
+}
+message GetMessagesResponse {
+  repeated Message messages = 1;
+}
+
+message ListTopicsRequest {}
+message ListTopicsResponse {
+  repeated Topic topics = 1;
+}
+
+message GetSubscriptionNodeRequest {
+  int64 user_id = 1;
+  repeated int64 topic_ids = 2;
+}
+message GetSubscriptionNodeResponse {
+  NodeInfo node = 1;
+  string subscribe_token = 2;
+}
+
+/* ===== SERVICES ===== */
+
+service MessageBoard {
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  rpc CreateTopic(CreateTopicRequest) returns (CreateTopicResponse);
+
+  rpc PostMessage(PostMessageRequest) returns (Message);
+  rpc UpdateMessage(UpdateMessageRequest) returns (Message);
+  rpc DeleteMessage(DeleteMessageRequest) returns (Message);
+  rpc LikeMessage(LikeMessageRequest) returns (Message);
+
+  rpc ListTopics(ListTopicsRequest) returns (ListTopicsResponse);
+  rpc GetMessages(GetMessagesRequest) returns (GetMessagesResponse);
+
+  rpc GetSubscriptionNode(GetSubscriptionNodeRequest)
+      returns (GetSubscriptionNodeResponse);
+
+  rpc SubscribeTopic(SubscribeRequest) returns (stream MessageEvent);
+}
+
+service ControlPlane {
+  rpc GetHead(google.protobuf.Empty) returns (NodeInfo);
+  rpc GetTail(google.protobuf.Empty) returns (NodeInfo);
+}
