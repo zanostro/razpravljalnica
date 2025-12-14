@@ -99,8 +99,32 @@ func (s *Store) DeleteMessage(topicID, messageID, userID int64) (Message, error)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// TODO implement
-	return Message{}, nil
+	if _, ok := s.users[userID]; !ok {
+		return Message{}, ErrNotFound
+	}
+	if _, ok := s.topics[topicID]; !ok {
+		return Message{}, ErrNotFound
+	}
+
+	key := MsgKey{TopicID: topicID, MessageID: messageID}
+	pm, ok := s.messages[key]
+	if !ok {
+		return Message{}, ErrNotFound
+	}
+	if pm.UserID != userID {
+		return Message{}, ErrForbidden
+	}
+
+	// pobriši tudi likes
+	for lk := range s.likes {
+		if lk[0] == topicID && lk[1] == messageID {
+			delete(s.likes, lk)
+		}
+	}
+
+	deleted := *pm
+	delete(s.messages, key)
+	return deleted, nil
 }
 
 func (s *Store) LikeMessage(topicID, messageID, userID int64) (Message, error) {

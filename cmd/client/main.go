@@ -81,4 +81,30 @@ func main() {
 	for _, m := range msgs.Messages {
 		fmt.Printf("- #%d (u=%d) [%s] %s likes=%d\n", m.Id, m.UserId, m.CreatedAt.AsTime().Format(time.RFC3339), m.Text, m.Likes)
 	}
+
+	_, err = c.DeleteMessage(ctx, &pb.DeleteMessageRequest{
+		TopicId:   t.Id,
+		UserId:    u.Id,
+		MessageId: posted.Id,
+	})
+	if err != nil {
+		log.Fatal("DeleteMessage:", err)
+	}
+
+	// ponovno preberi messages po delete-u
+	msgs2, err := c.GetMessages(ctx, &pb.GetMessagesRequest{
+		TopicId:       t.Id,
+		FromMessageId: 0,
+		Limit:         10,
+	})
+	if err != nil {
+		log.Fatal("GetMessages after delete:", err)
+	}
+
+	fmt.Println("Messages after delete:")
+	for _, m := range msgs2.Messages {
+		fmt.Printf("- #%d (u=%d) [%s] %s likes=%d\n",
+			m.Id, m.UserId, m.CreatedAt.AsTime().Format(time.RFC3339), m.Text, m.Likes)
+	}
+
 }

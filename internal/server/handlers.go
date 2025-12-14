@@ -95,8 +95,14 @@ func (s *Server) DeleteMessage(ctx context.Context, req *pb.DeleteMessageRequest
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "nil request")
 	}
-	_, _ = ctx, req
-	return nil, status.Error(codes.Unimplemented, "DeleteMessage not implemented yet")
+	_ = ctx
+
+	_, err := s.store.DeleteMessage(req.GetTopicId(), req.GetMessageId(), req.GetUserId())
+	if err != nil {
+		return nil, grpcErr(err)
+	}
+
+	return &emptypb.Empty{}, nil
 }
 
 func (s *Server) LikeMessage(ctx context.Context, req *pb.LikeMessageRequest) (*pb.Message, error) {
