@@ -90,8 +90,21 @@ func (s *Server) LikeMessage(ctx context.Context, req *pb.LikeMessageRequest) (*
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "nil request")
 	}
-	_, _ = ctx, req
-	return nil, status.Error(codes.Unimplemented, "LikeMessage not implemented yet")
+	_ = ctx
+
+	m, err := s.store.LikeMessage(req.GetTopicId(), req.GetMessageId(), req.GetUserId())
+	if err != nil {
+		return nil, grpcErr(err)
+	}
+
+	return &pb.Message{
+		Id:        m.ID,
+		TopicId:   m.TopicID,
+		UserId:    m.UserID,
+		Text:      m.Text,
+		CreatedAt: timestamppb.New(m.CreatedAt),
+		Likes:     m.Likes,
+	}, nil
 }
 
 func (s *Server) ListTopics(ctx context.Context, _ *emptypb.Empty) (*pb.ListTopicsResponse, error) {

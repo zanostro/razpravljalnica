@@ -88,8 +88,28 @@ func (s *Store) LikeMessage(topicID, messageID, userID int64) (Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// TODO implement
-	return Message{}, nil
+	if _, ok := s.users[userID]; !ok {
+		return Message{}, ErrNotFound
+	}
+	if _, ok := s.topics[topicID]; !ok {
+		return Message{}, ErrNotFound
+	}
+
+	key := MsgKey{TopicID: topicID, MessageID: messageID}
+	pm, ok := s.messages[key]
+	if !ok {
+		return Message{}, ErrNotFound
+	}
+
+	// prepreči double-like
+	lk := [3]int64{topicID, messageID, userID}
+	if _, exists := s.likes[lk]; exists {
+		return Message{}, ErrDuplicate
+	}
+	s.likes[lk] = struct{}{}
+
+	pm.Likes++
+	return *pm, nil
 }
 
 func (s *Store) ListTopics() ([]Topic, error) {

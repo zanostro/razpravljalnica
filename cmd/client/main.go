@@ -34,7 +34,7 @@ func main() {
 		log.Fatal("CreateTopic:", err)
 	}
 
-	_, err = c.PostMessage(ctx, &pb.PostMessageRequest{
+	posted, err := c.PostMessage(ctx, &pb.PostMessageRequest{
 		TopicId: t.Id,
 		UserId:  u.Id,
 		Text:    "hello world",
@@ -43,10 +43,19 @@ func main() {
 		log.Fatal("PostMessage:", err)
 	}
 
+	_, err = c.LikeMessage(ctx, &pb.LikeMessageRequest{
+		TopicId:   t.Id,
+		MessageId: posted.Id,
+		UserId:    u.Id,
+	})
+	if err != nil {
+		log.Fatal("LikeMessage:", err)
+	}
+
 	msgs, err := c.GetMessages(ctx, &pb.GetMessagesRequest{
-		TopicId:        t.Id,
-		FromMessageId:  0,
-		Limit:          10,
+		TopicId:       t.Id,
+		FromMessageId: 0,
+		Limit:         10,
 	})
 	if err != nil {
 		log.Fatal("GetMessages:", err)
