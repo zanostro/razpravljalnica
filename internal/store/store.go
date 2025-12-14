@@ -1,6 +1,9 @@
 package store
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 // Core modeli (notranji, ne pb tipi)
 type User struct {
@@ -14,11 +17,12 @@ type Topic struct {
 }
 
 type Message struct {
-	ID      int64
-	TopicID int64
-	UserID  int64
-	Content string
-	Likes   int64
+	ID        int64
+	TopicID   int64
+	UserID    int64
+	Text      string
+	CreatedAt time.Time
+	Likes     int32
 }
 
 // Key za hitro mapiranje message-ov po (topic,message)
@@ -46,12 +50,12 @@ type Store struct {
 
 func New() *Store {
 	return &Store{
-		users:          make(map[int64]User),
-		topics:         make(map[int64]Topic),
-		messages:       make(map[MsgKey]*Message),
-		likes:          make(map[[3]int64]struct{}),
-		nextUserID:     1,
-		nextTopicID:    1,
-		nextMessageID:  1,
+		users:         make(map[int64]User),
+		topics:        make(map[int64]Topic),
+		messages:      make(map[MsgKey]*Message),
+		likes:         make(map[[3]int64]struct{}),
+		nextUserID:    1,
+		nextTopicID:   1,
+		nextMessageID: 1,
 	}
 }

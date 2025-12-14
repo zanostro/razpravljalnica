@@ -7,6 +7,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/zanostro/razpravljalnica/gen/pb"
 	"github.com/zanostro/razpravljalnica/internal/store"
@@ -14,41 +15,37 @@ import (
 
 // MessageBoard RPCs
 
-func (s *Server) CreateUser(ctx context.Context, req *pb.CreateUserRequest) (*pb.CreateUserResponse, error) {
+func (s *Server) CreateUser(ctx context.Context, req *pb.CreateUserRequest) (*pb.User, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "nil request")
 	}
 	_ = ctx
 
-	u, err := s.store.CreateUser(req.GetUsername())
+	u, err := s.store.CreateUser(req.GetName())
 	if err != nil {
 		return nil, grpcErr(err)
 	}
 
-	return &pb.CreateUserResponse{
-		User: &pb.User{
-			UserId:   u.ID,
-			Username: u.Username,
-		},
+	return &pb.User{
+		Id:   u.ID,
+		Name: u.Username,
 	}, nil
 }
 
-func (s *Server) CreateTopic(ctx context.Context, req *pb.CreateTopicRequest) (*pb.CreateTopicResponse, error) {
+func (s *Server) CreateTopic(ctx context.Context, req *pb.CreateTopicRequest) (*pb.Topic, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "nil request")
 	}
 	_ = ctx
 
-	t, err := s.store.CreateTopic(req.GetTitle())
+	t, err := s.store.CreateTopic(req.GetName())
 	if err != nil {
 		return nil, grpcErr(err)
 	}
 
-	return &pb.CreateTopicResponse{
-		Topic: &pb.Topic{
-			TopicId: t.ID,
-			Title:   t.Title,
-		},
+	return &pb.Topic{
+		Id:   t.ID,
+		Name: t.Title,
 	}, nil
 }
 
@@ -56,8 +53,21 @@ func (s *Server) PostMessage(ctx context.Context, req *pb.PostMessageRequest) (*
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "nil request")
 	}
-	_, _ = ctx, req
-	return nil, status.Error(codes.Unimplemented, "PostMessage not implemented yet")
+	_ = ctx
+
+	m, err := s.store.PostMessage(req.GetTopicId(), req.GetUserId(), req.GetText())
+	if err != nil {
+		return nil, grpcErr(err)
+	}
+
+	return &pb.Message{
+		Id:        m.ID,
+		TopicId:   m.TopicID,
+		UserId:    m.UserID,
+		Text:      m.Text,
+		CreatedAt: timestamppb.New(m.CreatedAt),
+		Likes:     m.Likes,
+	}, nil
 }
 
 func (s *Server) UpdateMessage(ctx context.Context, req *pb.UpdateMessageRequest) (*pb.Message, error) {
@@ -68,7 +78,7 @@ func (s *Server) UpdateMessage(ctx context.Context, req *pb.UpdateMessageRequest
 	return nil, status.Error(codes.Unimplemented, "UpdateMessage not implemented yet")
 }
 
-func (s *Server) DeleteMessage(ctx context.Context, req *pb.DeleteMessageRequest) (*pb.Message, error) {
+func (s *Server) DeleteMessage(ctx context.Context, req *pb.DeleteMessageRequest) (*emptypb.Empty, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "nil request")
 	}
@@ -84,10 +94,7 @@ func (s *Server) LikeMessage(ctx context.Context, req *pb.LikeMessageRequest) (*
 	return nil, status.Error(codes.Unimplemented, "LikeMessage not implemented yet")
 }
 
-func (s *Server) ListTopics(ctx context.Context, req *pb.ListTopicsRequest) (*pb.ListTopicsResponse, error) {
-	if req == nil {
-		return nil, status.Error(codes.InvalidArgument, "nil request")
-	}
+func (s *Server) ListTopics(ctx context.Context, _ *emptypb.Empty) (*pb.ListTopicsResponse, error) {
 	_ = ctx
 
 	topics, err := s.store.ListTopics()
@@ -98,8 +105,8 @@ func (s *Server) ListTopics(ctx context.Context, req *pb.ListTopicsRequest) (*pb
 	out := make([]*pb.Topic, 0, len(topics))
 	for _, t := range topics {
 		out = append(out, &pb.Topic{
-			TopicId: t.ID,
-			Title:   t.Title,
+			Id:   t.ID,
+			Name: t.Title,
 		})
 	}
 
@@ -110,11 +117,29 @@ func (s *Server) GetMessages(ctx context.Context, req *pb.GetMessagesRequest) (*
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "nil request")
 	}
-	_, _ = ctx, req
-	return nil, status.Error(codes.Unimplemented, "GetMessages not implemented yet")
+	_ = ctx
+
+	msgs, err := s.store.GetMessages(req.GetTopicId(), req.GetFromMessageId(), req.GetLimit())
+	if err != nil {
+		return nil, grpcErr(err)
+	}
+
+	out := make([]*pb.Message, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, &pb.Message{
+			Id:        m.ID,
+			TopicId:   m.TopicID,
+			UserId:    m.UserID,
+			Text:      m.Text,
+			CreatedAt: timestamppb.New(m.CreatedAt),
+			Likes:     m.Likes,
+		})
+	}
+
+	return &pb.GetMessagesResponse{Messages: out}, nil
 }
 
-func (s *Server) GetSubscriptionNode(ctx context.Context, req *pb.GetSubscriptionNodeRequest) (*pb.GetSubscriptionNodeResponse, error) {
+func (s *Server) GetSubscriptionNode(ctx context.Context, req *pb.SubscriptionNodeRequest) (*pb.SubscriptionNodeResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "nil request")
 	}
@@ -122,7 +147,7 @@ func (s *Server) GetSubscriptionNode(ctx context.Context, req *pb.GetSubscriptio
 	return nil, status.Error(codes.Unimplemented, "GetSubscriptionNode not implemented yet")
 }
 
-func (s *Server) SubscribeTopic(req *pb.SubscribeRequest, stream pb.MessageBoard_SubscribeTopicServer) error {
+func (s *Server) SubscribeTopic(req *pb.SubscribeTopicRequest, stream pb.MessageBoard_SubscribeTopicServer) error {
 	if req == nil {
 		return status.Error(codes.InvalidArgument, "nil request")
 	}
