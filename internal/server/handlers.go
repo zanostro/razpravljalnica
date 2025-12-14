@@ -60,14 +60,23 @@ func (s *Server) PostMessage(ctx context.Context, req *pb.PostMessageRequest) (*
 		return nil, grpcErr(err)
 	}
 
-	return &pb.Message{
+	pbMsg := &pb.Message{
 		Id:        m.ID,
 		TopicId:   m.TopicID,
 		UserId:    m.UserID,
 		Text:      m.Text,
 		CreatedAt: timestamppb.New(m.CreatedAt),
 		Likes:     m.Likes,
-	}, nil
+	}
+
+	s.sub.Publish(m.TopicID, &pb.MessageEvent{
+		SequenceNumber: s.sub.NextSeq(),
+		Op:             pb.OpType_OP_POST,
+		Message:        pbMsg,
+		EventAt:        timestamppb.Now(),
+	})
+
+	return pbMsg, nil
 }
 
 func (s *Server) UpdateMessage(ctx context.Context, req *pb.UpdateMessageRequest) (*pb.Message, error) {
@@ -81,14 +90,23 @@ func (s *Server) UpdateMessage(ctx context.Context, req *pb.UpdateMessageRequest
 		return nil, grpcErr(err)
 	}
 
-	return &pb.Message{
+	pbMsg := &pb.Message{
 		Id:        m.ID,
 		TopicId:   m.TopicID,
 		UserId:    m.UserID,
 		Text:      m.Text,
 		CreatedAt: timestamppb.New(m.CreatedAt),
 		Likes:     m.Likes,
-	}, nil
+	}
+
+	s.sub.Publish(m.TopicID, &pb.MessageEvent{
+		SequenceNumber: s.sub.NextSeq(),
+		Op:             pb.OpType_OP_UPDATE,
+		Message:        pbMsg,
+		EventAt:        timestamppb.Now(),
+	})
+
+	return pbMsg, nil
 }
 
 func (s *Server) DeleteMessage(ctx context.Context, req *pb.DeleteMessageRequest) (*emptypb.Empty, error) {
@@ -97,10 +115,28 @@ func (s *Server) DeleteMessage(ctx context.Context, req *pb.DeleteMessageRequest
 	}
 	_ = ctx
 
-	_, err := s.store.DeleteMessage(req.GetTopicId(), req.GetMessageId(), req.GetUserId())
+	deleted, err := s.store.DeleteMessage(
+		req.GetTopicId(),
+		req.GetMessageId(),
+		req.GetUserId(),
+	)
 	if err != nil {
 		return nil, grpcErr(err)
 	}
+
+	s.sub.Publish(deleted.TopicID, &pb.MessageEvent{
+		SequenceNumber: s.sub.NextSeq(),
+		Op:             pb.OpType_OP_DELETE,
+		Message: &pb.Message{
+			Id:        deleted.ID,
+			TopicId:   deleted.TopicID,
+			UserId:    deleted.UserID,
+			Text:      deleted.Text,
+			CreatedAt: timestamppb.New(deleted.CreatedAt),
+			Likes:     deleted.Likes,
+		},
+		EventAt: timestamppb.Now(),
+	})
 
 	return &emptypb.Empty{}, nil
 }
@@ -116,14 +152,23 @@ func (s *Server) LikeMessage(ctx context.Context, req *pb.LikeMessageRequest) (*
 		return nil, grpcErr(err)
 	}
 
-	return &pb.Message{
+	pbMsg := &pb.Message{
 		Id:        m.ID,
 		TopicId:   m.TopicID,
 		UserId:    m.UserID,
 		Text:      m.Text,
 		CreatedAt: timestamppb.New(m.CreatedAt),
 		Likes:     m.Likes,
-	}, nil
+	}
+
+	s.sub.Publish(m.TopicID, &pb.MessageEvent{
+		SequenceNumber: s.sub.NextSeq(),
+		Op:             pb.OpType_OP_LIKE,
+		Message:        pbMsg,
+		EventAt:        timestamppb.Now(),
+	})
+
+	return pbMsg, nil
 }
 
 func (s *Server) ListTopics(ctx context.Context, _ *emptypb.Empty) (*pb.ListTopicsResponse, error) {
@@ -191,8 +236,59 @@ func (s *Server) SubscribeTopic(req *pb.SubscribeTopicRequest, stream pb.Message
 	if req == nil {
 		return status.Error(codes.InvalidArgument, "nil request")
 	}
-	_ = stream
-	return status.Error(codes.Unimplemented, "SubscribeTopic not implemented yet")
+
+	// single-node token
+	if req.GetSubscribeToken() != "dummy" {
+		return status.Error(codes.PermissionDenied, "bad token")
+	}
+
+	userID := req.GetUserId()
+	topics := req.GetTopicId()
+	fromID := req.GetFromMessageId()
+
+	// catch-up: pošlji existing messages kot OP_POST
+	for _, tid := range topics {
+		msgs, err := s.store.GetMessages(tid, fromID, 1000000)
+		if err != nil {
+			return grpcErr(err)
+		}
+		for _, m := range msgs {
+			ev := &pb.MessageEvent{
+				SequenceNumber: s.sub.NextSeq(),
+				Op:             pb.OpType_OP_POST,
+				Message: &pb.Message{
+					Id:        m.ID,
+					TopicId:   m.TopicID,
+					UserId:    m.UserID,
+					Text:      m.Text,
+					CreatedAt: timestamppb.New(m.CreatedAt),
+					Likes:     m.Likes,
+				},
+				EventAt: timestamppb.Now(),
+			}
+			if err := stream.Send(ev); err != nil {
+				return err
+			}
+		}
+	}
+
+	// live
+	subID, ch := s.sub.Add(userID, topics)
+	defer s.sub.Remove(subID)
+
+	for {
+		select {
+		case <-stream.Context().Done():
+			return nil
+		case ev, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			if err := stream.Send(ev); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 func (s *Server) GetClusterState(ctx context.Context, _ *emptypb.Empty) (*pb.GetClusterStateResponse, error) {
