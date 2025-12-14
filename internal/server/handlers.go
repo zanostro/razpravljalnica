@@ -175,8 +175,16 @@ func (s *Server) GetSubscriptionNode(ctx context.Context, req *pb.SubscriptionNo
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "nil request")
 	}
-	_, _ = ctx, req
-	return nil, status.Error(codes.Unimplemented, "GetSubscriptionNode not implemented yet")
+	_ = ctx
+
+	// Single-node
+	return &pb.SubscriptionNodeResponse{
+		SubscribeToken: "dummy",
+		Node: &pb.NodeInfo{
+			NodeId:  "local",
+			Address: "127.0.0.1:50051",
+		},
+	}, nil
 }
 
 func (s *Server) SubscribeTopic(req *pb.SubscribeTopicRequest, stream pb.MessageBoard_SubscribeTopicServer) error {
@@ -187,16 +195,18 @@ func (s *Server) SubscribeTopic(req *pb.SubscribeTopicRequest, stream pb.Message
 	return status.Error(codes.Unimplemented, "SubscribeTopic not implemented yet")
 }
 
-// ControlPlane RPCs
-
-func (s *Server) GetHead(ctx context.Context, _ *emptypb.Empty) (*pb.NodeInfo, error) {
+func (s *Server) GetClusterState(ctx context.Context, _ *emptypb.Empty) (*pb.GetClusterStateResponse, error) {
 	_ = ctx
-	return nil, status.Error(codes.Unimplemented, "GetHead not implemented yet")
-}
 
-func (s *Server) GetTail(ctx context.Context, _ *emptypb.Empty) (*pb.NodeInfo, error) {
-	_ = ctx
-	return nil, status.Error(codes.Unimplemented, "GetTail not implemented yet")
+	ni := &pb.NodeInfo{
+		NodeId:  "local",
+		Address: "127.0.0.1:50051",
+	}
+
+	return &pb.GetClusterStateResponse{
+		Head: ni,
+		Tail: ni,
+	}, nil
 }
 
 // Helper: map store errors -> gRPC codes (za kasneje)

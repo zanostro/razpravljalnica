@@ -107,4 +107,12 @@ func main() {
 			m.Id, m.UserId, m.CreatedAt.AsTime().Format(time.RFC3339), m.Text, m.Likes)
 	}
 
+	cp := pb.NewControlPlaneClient(conn)
+
+	state, err := cp.GetClusterState(ctx, &emptypb.Empty{})
+	if err != nil {
+		log.Fatal("GetClusterState:", err)
+	}
+	fmt.Println("Cluster:", "head=", state.Head.Address, "tail=", state.Tail.Address)
+
 }
