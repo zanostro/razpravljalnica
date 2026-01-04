@@ -37,3 +37,5 @@ temp/
 /gen/**/*.tmp
 navodila.md
 replikacija-1.md
+chain_node
+client

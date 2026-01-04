@@ -27,9 +27,30 @@ chain:
 
 ### Running Chain Replication
 
-Start each node in a separate terminal:
+**Quick Start** - Use the automated script:
 
 ```bash
+chmod +x start_chain.sh
+./start_chain.sh
+```
+
+This will:
+- Build all binaries
+- Start all 3 chain nodes (HEAD, MIDDLE, TAIL)
+- Show node PIDs and log locations
+
+Then launch the GUI client:
+```bash
+./client
+```
+
+**Manual Start** - Start each node in a separate terminal:
+
+```bash
+# Build first
+go build -o chain_node ./cmd/chain_node
+go build -o client ./cmd/client
+
 # Terminal 1 - TAIL node
 ./chain_node -node node3
 
@@ -40,9 +61,9 @@ Start each node in a separate terminal:
 ./chain_node -node node1
 ```
 
-Or build first:
+**Stop all nodes:**
 ```bash
-go build ./cmd/chain_node
+pkill chain_node
 ```
 
 ### Testing
