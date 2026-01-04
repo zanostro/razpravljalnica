@@ -92,109 +92,137 @@ func prepareUI(client_app *tview.Application) *UI {
 	return ui
 }
 
-func add_message_to_list(ctx context.Context, mb pb.MessageBoardClient, t *pb.Topic, ui *UI, u *pb.User, current_msg *pb.Message) {
-	ui.MessageList.AddItem(current_msg.Text, "", 0, func() {
-		if item := ui.MsgEditForm.GetFormItem(0); item != nil {
-			item.(*tview.InputField).SetText(current_msg.Text)
-		}
-		if current_msg.UserId != u.Id {
-			ui.MsgEditForm.GetButton(0).SetDisabled(true)
-			ui.MsgEditForm.GetButton(0).SetBackgroundColor(tcell.Color(100))
-			ui.MsgEditForm.GetButton(0).SetLabelColor(tcell.Color(0))
-			ui.MsgEditForm.GetFormItem(0).SetDisabled(true)
-		} else {
-			ui.MsgEditForm.GetButton(0).SetDisabled(false)
-			ui.MsgEditForm.GetFormItem(0).SetDisabled(false)
-		}
-		ui.MsgEditForm.GetButton(0).SetSelectedFunc(func() {
-			if item := ui.MsgEditForm.GetFormItem(0); item != nil {
-				text := item.(*tview.InputField).GetText()
-				msg, _ := mb.UpdateMessage(ctx, &pb.UpdateMessageRequest{TopicId: t.Id, UserId: u.Id, MessageId: current_msg.Id, Text: text})
-				if msg == nil {
-					ui.Pages.SwitchToPage("Select_action")
-				} else {
-					ui.MessageList.RemoveItem(int(current_msg.Id))
-					ui.MessageList.InsertItem(int(current_msg.Id), msg.Text, "", 0, func() {})
-					ui.Pages.SwitchToPage("Select_action")
-					reload_messages(ctx, mb, t, ui, u)
-				}
-			}
-		})
-		ui.MsgEditForm.GetButton(1).SetSelectedFunc(func() {
-			if item := ui.MsgEditForm.GetFormItem(0); item != nil {
-				//msg, _ := mb.LikeMessage(ctx, &pb.LikeMessageRequest{TopicId: t.Id, UserId: u.Id, MessageId: current_msg.Id})
-
-				ui.Pages.SwitchToPage("Select_action")
-				reload_messages(ctx, mb, t, ui, u)
-			}
-		})
-		ui.Pages.SwitchToPage("Edit_message")
-	})
-}
-
-func reload_messages(ctx context.Context, mb pb.MessageBoardClient, t *pb.Topic, ui *UI, u *pb.User) {
-	topic_messages, err := mb.GetMessages(ctx, &pb.GetMessagesRequest{TopicId: t.Id})
-	if err != nil {
-		log.Fatal("GetMessages:", err)
-	}
-
-	ui.MessageList.Clear()
-	for msg_id := range topic_messages.Messages {
-		current_msg := topic_messages.Messages[msg_id]
-		add_message_to_list(ctx, mb, t, ui, u, current_msg)
-	}
-}
-
 func main() {
-	conn, err := grpc.Dial("127.0.0.1:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// Connect to HEAD node (default)
+	headConn, err := grpc.Dial("127.0.0.1:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer conn.Close()
-
-	mb := pb.NewMessageBoardClient(conn)
-	// cp := pb.NewControlPlaneClient(conn)
+	defer headConn.Close()
 
 	ctx := context.Background()
+
+	// Get cluster state to find HEAD and TAIL addresses
+	cp := pb.NewControlPlaneClient(headConn)
+	state, err := cp.GetClusterState(ctx, &emptypb.Empty{})
+	if err != nil {
+		log.Printf("Warning: GetClusterState failed, using single node mode: %v", err)
+		// Fallback to single node
+		state = &pb.GetClusterStateResponse{
+			Head: &pb.NodeInfo{Address: "127.0.0.1:50051"},
+			Tail: &pb.NodeInfo{Address: "127.0.0.1:50051"},
+		}
+	}
+
+	log.Printf("Connected to chain: HEAD=%s TAIL=%s", state.Head.Address, state.Tail.Address)
+
+	// Connect to HEAD for writes
+	if state.Head.Address != "127.0.0.1:50051" {
+		headConn.Close()
+		headConn, err = grpc.Dial(state.Head.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			log.Fatal("Connect to HEAD:", err)
+		}
+		defer headConn.Close()
+	}
+	mbWrite := pb.NewMessageBoardClient(headConn)
+
+	// Connect to TAIL for reads
+	tailConn, err := grpc.Dial(state.Tail.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Fatal("Connect to TAIL:", err)
+	}
+	defer tailConn.Close()
+	mbRead := pb.NewMessageBoardClient(tailConn)
 
 	client_app := tview.NewApplication()
 	ui := prepareUI(client_app)
 
-	// shared setup
-	u, err := mb.CreateUser(ctx, &pb.CreateUserRequest{Name: "ana"})
+	// Helper functions that use both HEAD (write) and TAIL (read) clients
+	var t *pb.Topic
+	var reloadMessages func(*pb.Topic, *pb.User) // forward declaration
+	
+	reloadMessages = func(topic *pb.Topic, u *pb.User) {
+		topic_messages, err := mbRead.GetMessages(ctx, &pb.GetMessagesRequest{TopicId: topic.Id})
+		if err != nil {
+			log.Printf("GetMessages error: %v", err)
+			return
+		}
+		ui.MessageList.Clear()
+		for _, current_msg := range topic_messages.Messages {
+			msg := current_msg // capture for closure
+			ui.MessageList.AddItem(msg.Text, "", 0, func() {
+				if item := ui.MsgEditForm.GetFormItem(0); item != nil {
+					item.(*tview.InputField).SetText(msg.Text)
+				}
+				if msg.UserId != u.Id {
+					ui.MsgEditForm.GetButton(0).SetDisabled(true)
+					ui.MsgEditForm.GetButton(0).SetBackgroundColor(tcell.Color(100))
+					ui.MsgEditForm.GetButton(0).SetLabelColor(tcell.Color(0))
+					ui.MsgEditForm.GetFormItem(0).SetDisabled(true)
+				} else {
+					ui.MsgEditForm.GetButton(0).SetDisabled(false)
+					ui.MsgEditForm.GetFormItem(0).SetDisabled(false)
+				}
+				ui.MsgEditForm.GetButton(0).SetSelectedFunc(func() {
+					if item := ui.MsgEditForm.GetFormItem(0); item != nil {
+						text := item.(*tview.InputField).GetText()
+						// UPDATE on HEAD (write)
+						updatedMsg, _ := mbWrite.UpdateMessage(ctx, &pb.UpdateMessageRequest{
+							TopicId: topic.Id, UserId: u.Id, MessageId: msg.Id, Text: text})
+						if updatedMsg != nil {
+							reloadMessages(topic, u)
+						}
+						ui.Pages.SwitchToPage("Select_action")
+					}
+				})
+				ui.MsgEditForm.GetButton(1).SetSelectedFunc(func() {
+					// LIKE on HEAD (write)
+					mbWrite.LikeMessage(ctx, &pb.LikeMessageRequest{
+						TopicId: topic.Id, UserId: u.Id, MessageId: msg.Id})
+					reloadMessages(topic, u)
+					ui.Pages.SwitchToPage("Select_action")
+				})
+				ui.Pages.SwitchToPage("Edit_message")
+			})
+		}
+	}
+
+	// shared setup - CREATE USER on HEAD (write)
+	u, err := mbWrite.CreateUser(ctx, &pb.CreateUserRequest{Name: "ana"})
 	if err != nil {
 		log.Fatal("CreateUser:", err)
 	}
 
-	get_all_topics, err := mb.ListTopics(ctx, &emptypb.Empty{})
+	// GET TOPICS from TAIL (read)
+	get_all_topics, err := mbRead.ListTopics(ctx, &emptypb.Empty{})
 	if err != nil {
-		log.Fatal("ListTopcis:", err)
+		log.Fatal("ListTopics:", err)
 	}
-
-	var t *pb.Topic
 
 	for topic_id := range get_all_topics.Topics {
 		current_topic := get_all_topics.Topics[topic_id]
 		ui.TopicList.AddItem(current_topic.Name, "", 0, func() {
 			t = current_topic
-			reload_messages(ctx, mb, t, ui, u)
+			reloadMessages(t, u)
 		})
 	}
 
 	ui.TopicForm.GetButton(0).SetSelectedFunc(func() {
 		if item := ui.TopicForm.GetFormItem(0); item != nil {
 			text := item.(*tview.InputField).GetText()
-			top, err := mb.CreateTopic(ctx, &pb.CreateTopicRequest{Name: text})
+			// CREATE TOPIC on HEAD (write)
+			top, err := mbWrite.CreateTopic(ctx, &pb.CreateTopicRequest{Name: text})
 			if err != nil {
 				log.Fatal("CreateTopic:", err)
 			}
 			item.(*tview.InputField).SetText("")
 			ui.TopicList.AddItem(top.Name, "", 0, func() {
 				t = top
-				reload_messages(ctx, mb, t, ui, u)
+				reloadMessages(t, u)
 			}).SetCurrentItem(int(top.Id))
 			t = top
-			reload_messages(ctx, mb, t, ui, u)
+			reloadMessages(t, u)
 			ui.Pages.SwitchToPage("Select_action")
 		}
 	})
@@ -203,12 +231,12 @@ func main() {
 		if item := ui.MsgForm.GetFormItem(0); item != nil {
 			text := item.(*tview.InputField).GetText()
 			if t != nil {
-				msg, err := mb.PostMessage(ctx, &pb.PostMessageRequest{TopicId: t.Id, UserId: u.Id, Text: text})
+				// POST MESSAGE on HEAD (write)
+				_, err := mbWrite.PostMessage(ctx, &pb.PostMessageRequest{TopicId: t.Id, UserId: u.Id, Text: text})
 				if err != nil {
 					log.Fatal("PostMessage:", err)
 				}
-				add_message_to_list(ctx, mb, t, ui, u, msg)
-				reload_messages(ctx, mb, t, ui, u)
+				reloadMessages(t, u)
 			}
 			item.(*tview.InputField).SetText("")
 			ui.Pages.SwitchToPage("Select_action")
