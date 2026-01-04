@@ -22,11 +22,11 @@ type Node struct {
 	role          config.NodeRole
 	store         *store.Store
 	successorAddr string
-	
+
 	// gRPC client connection to successor (if not TAIL)
 	successorConn   *grpc.ClientConn
 	successorClient pb.ChainReplicationClient
-	
+
 	// Pending acknowledgments (for HEAD and MIDDLE nodes)
 	pendingAcks map[int64]chan *pb.ChainOperationResult
 	ackMu       sync.RWMutex
