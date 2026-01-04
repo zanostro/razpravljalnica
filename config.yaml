@@ -1,0 +1,12 @@
+# Chain replication configuration
+chain:
+  nodes:
+    - node_id: "node1"
+      address: "localhost:50051"
+      role: "HEAD"
+    - node_id: "node2"
+      address: "localhost:50052"
+      role: "MIDDLE"
+    - node_id: "node3"
+      address: "localhost:50053"
+      role: "TAIL"
