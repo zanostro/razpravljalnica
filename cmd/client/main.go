@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"strconv"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -15,14 +18,17 @@ import (
 )
 
 type UI struct {
-	App         *tview.Application
-	Grid        *tview.Grid
-	Pages       *tview.Pages
-	TopicList   *tview.List
-	MessageList *tview.List
-	MsgForm     *tview.Form
-	MsgEditForm *tview.Form
-	TopicForm   *tview.Form
+	App            *tview.Application
+	Grid           *tview.Grid
+	Pages          *tview.Pages
+	TopicList      *tview.List
+	SubscribedList *tview.List
+	MessageList    *tview.List
+	PopupMessage   *tview.TextView
+	LikedList      *tview.List
+	MsgForm        *tview.Form
+	MsgEditForm    *tview.Form
+	TopicForm      *tview.Form
 }
 
 func prepareUI(client_app *tview.Application) *UI {
@@ -72,21 +78,30 @@ func prepareUI(client_app *tview.Application) *UI {
 	pages.AddPage("Select_action", editable_part, true, true)
 
 	topic_list := tview.NewList()
+	subscribed_list := tview.NewList()
 	message_list := tview.NewList()
+	liked_list := tview.NewList().SetSelectedFocusOnly(true)
+	sub_message := tview.NewTextView()
 
-	box_grid.AddItem(topic_list, 0, 0, 1, 1, 0, 0, false)
-	box_grid.AddItem(message_list, 0, 1, 1, 1, 0, 0, false)
-	box_grid.AddItem(pages, 0, 2, 1, 1, 0, 0, true)
+	box_grid.AddItem(subscribed_list, 0, 0, 3, 1, 0, 0, false)
+	box_grid.AddItem(topic_list, 0, 1, 3, 3, 0, 0, false)
+	box_grid.AddItem(message_list, 0, 4, 3, 3, 0, 0, false)
+	box_grid.AddItem(sub_message, 3, 4, 1, 3, 0, 0, false)
+	box_grid.AddItem(liked_list, 0, 7, 3, 1, 0, 0, false)
+	box_grid.AddItem(pages, 0, 8, 4, 4, 0, 0, true)
 
 	ui := &UI{
-		App:         client_app,
-		Grid:        box_grid,
-		Pages:       pages,
-		TopicList:   topic_list,
-		MessageList: message_list,
-		MsgForm:     message_form,
-		MsgEditForm: msg_edit_form,
-		TopicForm:   topic_form,
+		App:            client_app,
+		Grid:           box_grid,
+		Pages:          pages,
+		TopicList:      topic_list,
+		SubscribedList: subscribed_list,
+		MessageList:    message_list,
+		PopupMessage:   sub_message,
+		LikedList:      liked_list,
+		MsgForm:        message_form,
+		MsgEditForm:    msg_edit_form,
+		TopicForm:      topic_form,
 	}
 
 	return ui
@@ -141,50 +156,70 @@ func main() {
 	// Helper functions that use both HEAD (write) and TAIL (read) clients
 	var t *pb.Topic
 	var reloadMessages func(*pb.Topic, *pb.User) // forward declaration
-	
+	var prev_topic *pb.Topic
+
 	reloadMessages = func(topic *pb.Topic, u *pb.User) {
 		topic_messages, err := mbRead.GetMessages(ctx, &pb.GetMessagesRequest{TopicId: topic.Id})
 		if err != nil {
 			log.Printf("GetMessages error: %v", err)
 			return
 		}
-		ui.MessageList.Clear()
+
+		if prev_topic == nil || prev_topic.Id != topic.Id {
+			ui.MessageList.Clear()
+			ui.LikedList.Clear()
+			prev_topic = topic
+		}
+		var msg_count int = 0
 		for _, current_msg := range topic_messages.Messages {
 			msg := current_msg // capture for closure
-			ui.MessageList.AddItem(msg.Text, "", 0, func() {
-				if item := ui.MsgEditForm.GetFormItem(0); item != nil {
-					item.(*tview.InputField).SetText(msg.Text)
-				}
-				if msg.UserId != u.Id {
-					ui.MsgEditForm.GetButton(0).SetDisabled(true)
-					ui.MsgEditForm.GetButton(0).SetBackgroundColor(tcell.Color(100))
-					ui.MsgEditForm.GetButton(0).SetLabelColor(tcell.Color(0))
-					ui.MsgEditForm.GetFormItem(0).SetDisabled(true)
-				} else {
-					ui.MsgEditForm.GetButton(0).SetDisabled(false)
-					ui.MsgEditForm.GetFormItem(0).SetDisabled(false)
-				}
-				ui.MsgEditForm.GetButton(0).SetSelectedFunc(func() {
+
+			if ui.LikedList.GetItemCount() <= msg_count {
+				ui.LikedList.InsertItem(msg_count, strconv.Itoa(int(msg.Likes)), "", 0, func() {})
+			} else {
+				ui.LikedList.SetItemText(msg_count, strconv.Itoa(int(msg.Likes)), "")
+			}
+
+			if ui.MessageList.GetItemCount() <= msg_count {
+				ui.MessageList.InsertItem(msg_count, msg.Text, "", 0, func() {
 					if item := ui.MsgEditForm.GetFormItem(0); item != nil {
-						text := item.(*tview.InputField).GetText()
-						// UPDATE on HEAD (write)
-						updatedMsg, _ := mbWrite.UpdateMessage(ctx, &pb.UpdateMessageRequest{
-							TopicId: topic.Id, UserId: u.Id, MessageId: msg.Id, Text: text})
-						if updatedMsg != nil {
-							reloadMessages(topic, u)
-						}
-						ui.Pages.SwitchToPage("Select_action")
+						item.(*tview.InputField).SetText(msg.Text)
 					}
+					if msg.UserId != u.Id {
+						ui.MsgEditForm.GetButton(0).SetDisabled(true)
+						ui.MsgEditForm.GetButton(0).SetBackgroundColor(tcell.Color(100))
+						ui.MsgEditForm.GetButton(0).SetLabelColor(tcell.Color(0))
+						ui.MsgEditForm.GetFormItem(0).SetDisabled(true)
+					} else {
+						ui.MsgEditForm.GetButton(0).SetDisabled(false)
+						ui.MsgEditForm.GetFormItem(0).SetDisabled(false)
+					}
+					ui.MsgEditForm.GetButton(0).SetSelectedFunc(func() {
+						if item := ui.MsgEditForm.GetFormItem(0); item != nil {
+							text := item.(*tview.InputField).GetText()
+							// UPDATE on HEAD (write)
+							updatedMsg, _ := mbWrite.UpdateMessage(ctx, &pb.UpdateMessageRequest{
+								TopicId: topic.Id, UserId: u.Id, MessageId: msg.Id, Text: text})
+							if updatedMsg != nil {
+								reloadMessages(topic, u)
+							}
+							ui.Pages.SwitchToPage("Select_action")
+						}
+					})
+					ui.MsgEditForm.GetButton(1).SetSelectedFunc(func() {
+						// LIKE on HEAD (write)
+						mbWrite.LikeMessage(ctx, &pb.LikeMessageRequest{
+							TopicId: topic.Id, UserId: u.Id, MessageId: msg.Id})
+						reloadMessages(topic, u)
+						ui.Pages.SwitchToPage("Select_action")
+					})
+					ui.Pages.SwitchToPage("Edit_message")
 				})
-				ui.MsgEditForm.GetButton(1).SetSelectedFunc(func() {
-					// LIKE on HEAD (write)
-					mbWrite.LikeMessage(ctx, &pb.LikeMessageRequest{
-						TopicId: topic.Id, UserId: u.Id, MessageId: msg.Id})
-					reloadMessages(topic, u)
-					ui.Pages.SwitchToPage("Select_action")
-				})
-				ui.Pages.SwitchToPage("Edit_message")
-			})
+			} else {
+				ui.MessageList.SetItemText(msg_count, msg.Text, "")
+			}
+
+			msg_count += 1
 		}
 	}
 
@@ -195,18 +230,90 @@ func main() {
 	}
 
 	// GET TOPICS from TAIL (read)
-	get_all_topics, err := mbRead.ListTopics(ctx, &emptypb.Empty{})
-	if err != nil {
-		log.Fatal("ListTopics:", err)
+
+	var subscriptions []string
+	var reloadTopics func()
+
+	reloadTopics = func() {
+		get_all_topics, err := mbRead.ListTopics(ctx, &emptypb.Empty{})
+		if err != nil {
+			log.Fatal("ListTopics:", err)
+		}
+		for len(subscriptions) < len(get_all_topics.Topics) {
+			subscriptions = append(subscriptions, "subscribe")
+		}
+
+		// ui.SubscribedList.Clear()
+		// ui.TopicList.Clear()
+		// client_app.Suspend(func() {
+		// 	fmt.Printf("all topics:%s\n", get_all_topics.Topics)
+		// })
+		for topic_id := range get_all_topics.Topics {
+			current_topic := get_all_topics.Topics[topic_id]
+			if t == nil {
+				t = current_topic
+			}
+
+			if current_topic.Id-1 >= int64(ui.SubscribedList.GetItemCount()) {
+				ui.SubscribedList.InsertItem(int(current_topic.Id)-1, subscriptions[current_topic.Id-1], "", 0, func() {
+					if subscriptions[current_topic.Id-1] == "subscribe" {
+
+						subNode, err := mbWrite.GetSubscriptionNode(ctx, &pb.SubscriptionNodeRequest{
+							UserId:  u.Id,
+							TopicId: []int64{current_topic.Id},
+						})
+						if err != nil {
+							log.Fatal(err)
+						}
+
+						ui.SubscribedList.SetItemText(int(current_topic.Id)-1, "subscribed", "")
+						subscriptions[current_topic.Id-1] = "subscribed"
+
+						go func() {
+							stream, _ := mbWrite.SubscribeTopic(ctx, &pb.SubscribeTopicRequest{TopicId: []int64{current_topic.Id}, UserId: u.Id, FromMessageId: 0, SubscribeToken: subNode.SubscribeToken})
+							for {
+								if subscriptions[current_topic.Id-1] == "subscribe" {
+									return
+								}
+								event, err := stream.Recv()
+								if err != nil {
+									log.Fatal(err)
+								}
+								var n_msg = fmt.Sprintf("topic=%d user=%d text=%q likes=%d",
+									event.Message.TopicId,
+									event.Message.UserId,
+									event.Message.Text,
+									event.Message.Likes)
+								if ui.PopupMessage.GetText(false) != "" {
+									if ui.PopupMessage.GetText(false) == n_msg {
+										continue
+									} else {
+										ui.PopupMessage.SetText(n_msg)
+										client_app.Draw()
+									}
+								} else {
+									ui.PopupMessage.SetText(n_msg)
+									client_app.Draw()
+								}
+							}
+						}()
+					} else {
+						ui.SubscribedList.SetItemText(int(current_topic.Id)-1, "subscribe", "")
+						subscriptions[current_topic.Id-1] = "subscribe"
+					}
+				}).SetSelectedFocusOnly(true)
+			}
+
+			if current_topic.Id-1 >= int64(ui.TopicList.GetItemCount()) {
+				ui.TopicList.InsertItem(int(current_topic.Id)-1, current_topic.Name, "", 0, func() {
+					t = current_topic
+					reloadMessages(t, u)
+				})
+			}
+		}
 	}
 
-	for topic_id := range get_all_topics.Topics {
-		current_topic := get_all_topics.Topics[topic_id]
-		ui.TopicList.AddItem(current_topic.Name, "", 0, func() {
-			t = current_topic
-			reloadMessages(t, u)
-		})
-	}
+	reloadTopics()
 
 	ui.TopicForm.GetButton(0).SetSelectedFunc(func() {
 		if item := ui.TopicForm.GetFormItem(0); item != nil {
@@ -243,124 +350,17 @@ func main() {
 		}
 	})
 
-	/*
-		go func() {
-			for {
-				topic_messages, err := mb.GetMessages(ctx, &pb.GetMessagesRequest{TopicId: t.Id})
-				if err != nil {
-					log.Fatal("GetMessages:", err)
-				}
+	go func() {
+		for {
 
-				if len(current_messages) > 0 {
-					for msg_id := range topic_messages.Messages {
-						current_msg := topic_messages.Messages[msg_id]
-						if current_msg != current_messages[msg_id] {
-							ui.App.QueueUpdateDraw(func() {
-								ui.MessageList.RemoveItem(msg_id)
-								ui.MessageList.InsertItem(msg_id, current_msg.Text, "", 0, func() {})
-								current_messages[msg_id] = current_msg
-							})
-						}
-					}
-				}
-				if len(current_messages) > 0 && len(topic_messages.Messages) > 0 {
-					for msg_id := range topic_messages.Messages {
-						current_msg := topic_messages.Messages[msg_id]
-						ui.App.QueueUpdateDraw(func() {
-							ui.MessageList.RemoveItem(msg_id)
-							ui.MessageList.InsertItem(msg_id, current_msg.Text, "", 0, func() {})
-							current_messages = append(current_messages, current_msg)
-						})
-					}
-				}
+			if t != nil && u != nil {
+				reloadTopics()
+				reloadMessages(t, u)
+				client_app.Draw()
 			}
-		}()
-	*/
-
-	/*
-		t, err := mb.CreateTopic(ctx, &pb.CreateTopicRequest{Name: "prva tema"})
-		if err != nil {
-			log.Fatal("CreateTopic:", err)
+			time.Sleep(1 * time.Second)
 		}
-
-		if mode == "sub" {
-			state, err := cp.GetClusterState(ctx, &emptypb.Empty{})
-			if err != nil {
-				log.Fatal("GetClusterState:", err)
-			}
-			fmt.Println("Cluster head/tail:", state.Head.Address, state.Tail.Address)
-
-			subNode, err := mb.GetSubscriptionNode(ctx, &pb.SubscriptionNodeRequest{
-				UserId:  u.Id,
-				TopicId: []int64{t.Id},
-			})
-			if err != nil {
-				log.Fatal("GetSubscriptionNode:", err)
-			}
-			fmt.Println("SubNode:", subNode.Node.Address, "token=", subNode.SubscribeToken)
-
-			stream, err := mb.SubscribeTopic(context.Background(), &pb.SubscribeTopicRequest{
-				TopicId:        []int64{t.Id},
-				UserId:         u.Id,
-				FromMessageId:  0,
-				SubscribeToken: subNode.SubscribeToken,
-			})
-			if err != nil {
-				log.Fatal("SubscribeTopic:", err)
-			}
-			fmt.Println("Subscribed. Waiting for events...")
-
-			for {
-				ev, err := stream.Recv()
-				if err != nil {
-					log.Fatal("stream recv:", err)
-				}
-				fmt.Printf("EVENT seq=%d op=%s topic=%d msg=%d text=%q likes=%d\n",
-					ev.SequenceNumber, ev.Op.String(),
-					ev.Message.TopicId, ev.Message.Id, ev.Message.Text, ev.Message.Likes)
-			}
-		}
-
-		// demo mode: povzroči nekaj eventov
-		posted, err := mb.PostMessage(ctx, &pb.PostMessageRequest{
-			TopicId: t.Id,
-			UserId:  u.Id,
-			Text:    "hello world",
-		})
-		if err != nil {
-			log.Fatal("PostMessage:", err)
-		}
-
-		_, err = mb.LikeMessage(ctx, &pb.LikeMessageRequest{
-			TopicId:   t.Id,
-			MessageId: posted.Id,
-			UserId:    u.Id,
-		})
-		if err != nil {
-			log.Fatal("LikeMessage:", err)
-		}
-
-		_, err = mb.UpdateMessage(ctx, &pb.UpdateMessageRequest{
-			TopicId:   t.Id,
-			UserId:    u.Id,
-			MessageId: posted.Id,
-			Text:      "edited text",
-		})
-		if err != nil {
-			log.Fatal("UpdateMessage:", err)
-		}
-
-		_, err = mb.DeleteMessage(ctx, &pb.DeleteMessageRequest{
-			TopicId:   t.Id,
-			UserId:    u.Id,
-			MessageId: posted.Id,
-		})
-		if err != nil {
-			log.Fatal("DeleteMessage:", err)
-		}
-
-		fmt.Println("demo done")
-	*/
+	}()
 
 	err = client_app.SetRoot(ui.Grid, true).EnableMouse(true).Run()
 	if err != nil {
