@@ -26,9 +26,9 @@ const (
 	MessageBoard_UpdateMessage_FullMethodName       = "/razpravljalnica.MessageBoard/UpdateMessage"
 	MessageBoard_DeleteMessage_FullMethodName       = "/razpravljalnica.MessageBoard/DeleteMessage"
 	MessageBoard_LikeMessage_FullMethodName         = "/razpravljalnica.MessageBoard/LikeMessage"
+	MessageBoard_GetSubscriptionNode_FullMethodName = "/razpravljalnica.MessageBoard/GetSubscriptionNode"
 	MessageBoard_ListTopics_FullMethodName          = "/razpravljalnica.MessageBoard/ListTopics"
 	MessageBoard_GetMessages_FullMethodName         = "/razpravljalnica.MessageBoard/GetMessages"
-	MessageBoard_GetSubscriptionNode_FullMethodName = "/razpravljalnica.MessageBoard/GetSubscriptionNode"
 	MessageBoard_SubscribeTopic_FullMethodName      = "/razpravljalnica.MessageBoard/SubscribeTopic"
 )
 
@@ -36,16 +36,26 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type MessageBoardClient interface {
-	CreateUser(ctx context.Context, in *CreateUserRequest, opts ...grpc.CallOption) (*CreateUserResponse, error)
-	CreateTopic(ctx context.Context, in *CreateTopicRequest, opts ...grpc.CallOption) (*CreateTopicResponse, error)
+	// Creates a new user and assigns it an id
+	CreateUser(ctx context.Context, in *CreateUserRequest, opts ...grpc.CallOption) (*User, error)
+	// Creates a new topic to which users can post messages
+	CreateTopic(ctx context.Context, in *CreateTopicRequest, opts ...grpc.CallOption) (*Topic, error)
+	// Post a message to a topic; Succed only if the User and the Topic exist in the data base.
 	PostMessage(ctx context.Context, in *PostMessageRequest, opts ...grpc.CallOption) (*Message, error)
+	// Update an existing message. Allowed only for the user who posted the message.
 	UpdateMessage(ctx context.Context, in *UpdateMessageRequest, opts ...grpc.CallOption) (*Message, error)
-	DeleteMessage(ctx context.Context, in *DeleteMessageRequest, opts ...grpc.CallOption) (*Message, error)
+	// Delete an existing message. Allowed only for the user who posted the message.
+	DeleteMessage(ctx context.Context, in *DeleteMessageRequest, opts ...grpc.CallOption) (*empty.Empty, error)
+	// Like an existing message. Return the message with the new number of likes.
 	LikeMessage(ctx context.Context, in *LikeMessageRequest, opts ...grpc.CallOption) (*Message, error)
-	ListTopics(ctx context.Context, in *ListTopicsRequest, opts ...grpc.CallOption) (*ListTopicsResponse, error)
+	// Request a node to which a subscription can be opened.
+	GetSubscriptionNode(ctx context.Context, in *SubscriptionNodeRequest, opts ...grpc.CallOption) (*SubscriptionNodeResponse, error)
+	// Returns all the topics
+	ListTopics(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*ListTopicsResponse, error)
+	// Returns messages in a topic
 	GetMessages(ctx context.Context, in *GetMessagesRequest, opts ...grpc.CallOption) (*GetMessagesResponse, error)
-	GetSubscriptionNode(ctx context.Context, in *GetSubscriptionNodeRequest, opts ...grpc.CallOption) (*GetSubscriptionNodeResponse, error)
-	SubscribeTopic(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[MessageEvent], error)
+	// Subscribe to topics; goes to the node returned by head
+	SubscribeTopic(ctx context.Context, in *SubscribeTopicRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[MessageEvent], error)
 }
 
 type messageBoardClient struct {
@@ -56,9 +66,9 @@ func NewMessageBoardClient(cc grpc.ClientConnInterface) MessageBoardClient {
 	return &messageBoardClient{cc}
 }
 
-func (c *messageBoardClient) CreateUser(ctx context.Context, in *CreateUserRequest, opts ...grpc.CallOption) (*CreateUserResponse, error) {
+func (c *messageBoardClient) CreateUser(ctx context.Context, in *CreateUserRequest, opts ...grpc.CallOption) (*User, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CreateUserResponse)
+	out := new(User)
 	err := c.cc.Invoke(ctx, MessageBoard_CreateUser_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -66,9 +76,9 @@ func (c *messageBoardClient) CreateUser(ctx context.Context, in *CreateUserReque
 	return out, nil
 }
 
-func (c *messageBoardClient) CreateTopic(ctx context.Context, in *CreateTopicRequest, opts ...grpc.CallOption) (*CreateTopicResponse, error) {
+func (c *messageBoardClient) CreateTopic(ctx context.Context, in *CreateTopicRequest, opts ...grpc.CallOption) (*Topic, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CreateTopicResponse)
+	out := new(Topic)
 	err := c.cc.Invoke(ctx, MessageBoard_CreateTopic_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -96,9 +106,9 @@ func (c *messageBoardClient) UpdateMessage(ctx context.Context, in *UpdateMessag
 	return out, nil
 }
 
-func (c *messageBoardClient) DeleteMessage(ctx context.Context, in *DeleteMessageRequest, opts ...grpc.CallOption) (*Message, error) {
+func (c *messageBoardClient) DeleteMessage(ctx context.Context, in *DeleteMessageRequest, opts ...grpc.CallOption) (*empty.Empty, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Message)
+	out := new(empty.Empty)
 	err := c.cc.Invoke(ctx, MessageBoard_DeleteMessage_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -116,7 +126,17 @@ func (c *messageBoardClient) LikeMessage(ctx context.Context, in *LikeMessageReq
 	return out, nil
 }
 
-func (c *messageBoardClient) ListTopics(ctx context.Context, in *ListTopicsRequest, opts ...grpc.CallOption) (*ListTopicsResponse, error) {
+func (c *messageBoardClient) GetSubscriptionNode(ctx context.Context, in *SubscriptionNodeRequest, opts ...grpc.CallOption) (*SubscriptionNodeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SubscriptionNodeResponse)
+	err := c.cc.Invoke(ctx, MessageBoard_GetSubscriptionNode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *messageBoardClient) ListTopics(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*ListTopicsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListTopicsResponse)
 	err := c.cc.Invoke(ctx, MessageBoard_ListTopics_FullMethodName, in, out, cOpts...)
@@ -136,23 +156,13 @@ func (c *messageBoardClient) GetMessages(ctx context.Context, in *GetMessagesReq
 	return out, nil
 }
 
-func (c *messageBoardClient) GetSubscriptionNode(ctx context.Context, in *GetSubscriptionNodeRequest, opts ...grpc.CallOption) (*GetSubscriptionNodeResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetSubscriptionNodeResponse)
-	err := c.cc.Invoke(ctx, MessageBoard_GetSubscriptionNode_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *messageBoardClient) SubscribeTopic(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[MessageEvent], error) {
+func (c *messageBoardClient) SubscribeTopic(ctx context.Context, in *SubscribeTopicRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[MessageEvent], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &MessageBoard_ServiceDesc.Streams[0], MessageBoard_SubscribeTopic_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[SubscribeRequest, MessageEvent]{ClientStream: stream}
+	x := &grpc.GenericClientStream[SubscribeTopicRequest, MessageEvent]{ClientStream: stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -169,16 +179,26 @@ type MessageBoard_SubscribeTopicClient = grpc.ServerStreamingClient[MessageEvent
 // All implementations must embed UnimplementedMessageBoardServer
 // for forward compatibility.
 type MessageBoardServer interface {
-	CreateUser(context.Context, *CreateUserRequest) (*CreateUserResponse, error)
-	CreateTopic(context.Context, *CreateTopicRequest) (*CreateTopicResponse, error)
+	// Creates a new user and assigns it an id
+	CreateUser(context.Context, *CreateUserRequest) (*User, error)
+	// Creates a new topic to which users can post messages
+	CreateTopic(context.Context, *CreateTopicRequest) (*Topic, error)
+	// Post a message to a topic; Succed only if the User and the Topic exist in the data base.
 	PostMessage(context.Context, *PostMessageRequest) (*Message, error)
+	// Update an existing message. Allowed only for the user who posted the message.
 	UpdateMessage(context.Context, *UpdateMessageRequest) (*Message, error)
-	DeleteMessage(context.Context, *DeleteMessageRequest) (*Message, error)
+	// Delete an existing message. Allowed only for the user who posted the message.
+	DeleteMessage(context.Context, *DeleteMessageRequest) (*empty.Empty, error)
+	// Like an existing message. Return the message with the new number of likes.
 	LikeMessage(context.Context, *LikeMessageRequest) (*Message, error)
-	ListTopics(context.Context, *ListTopicsRequest) (*ListTopicsResponse, error)
+	// Request a node to which a subscription can be opened.
+	GetSubscriptionNode(context.Context, *SubscriptionNodeRequest) (*SubscriptionNodeResponse, error)
+	// Returns all the topics
+	ListTopics(context.Context, *empty.Empty) (*ListTopicsResponse, error)
+	// Returns messages in a topic
 	GetMessages(context.Context, *GetMessagesRequest) (*GetMessagesResponse, error)
-	GetSubscriptionNode(context.Context, *GetSubscriptionNodeRequest) (*GetSubscriptionNodeResponse, error)
-	SubscribeTopic(*SubscribeRequest, grpc.ServerStreamingServer[MessageEvent]) error
+	// Subscribe to topics; goes to the node returned by head
+	SubscribeTopic(*SubscribeTopicRequest, grpc.ServerStreamingServer[MessageEvent]) error
 	mustEmbedUnimplementedMessageBoardServer()
 }
 
@@ -189,10 +209,10 @@ type MessageBoardServer interface {
 // pointer dereference when methods are called.
 type UnimplementedMessageBoardServer struct{}
 
-func (UnimplementedMessageBoardServer) CreateUser(context.Context, *CreateUserRequest) (*CreateUserResponse, error) {
+func (UnimplementedMessageBoardServer) CreateUser(context.Context, *CreateUserRequest) (*User, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateUser not implemented")
 }
-func (UnimplementedMessageBoardServer) CreateTopic(context.Context, *CreateTopicRequest) (*CreateTopicResponse, error) {
+func (UnimplementedMessageBoardServer) CreateTopic(context.Context, *CreateTopicRequest) (*Topic, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateTopic not implemented")
 }
 func (UnimplementedMessageBoardServer) PostMessage(context.Context, *PostMessageRequest) (*Message, error) {
@@ -201,22 +221,22 @@ func (UnimplementedMessageBoardServer) PostMessage(context.Context, *PostMessage
 func (UnimplementedMessageBoardServer) UpdateMessage(context.Context, *UpdateMessageRequest) (*Message, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateMessage not implemented")
 }
-func (UnimplementedMessageBoardServer) DeleteMessage(context.Context, *DeleteMessageRequest) (*Message, error) {
+func (UnimplementedMessageBoardServer) DeleteMessage(context.Context, *DeleteMessageRequest) (*empty.Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteMessage not implemented")
 }
 func (UnimplementedMessageBoardServer) LikeMessage(context.Context, *LikeMessageRequest) (*Message, error) {
 	return nil, status.Error(codes.Unimplemented, "method LikeMessage not implemented")
 }
-func (UnimplementedMessageBoardServer) ListTopics(context.Context, *ListTopicsRequest) (*ListTopicsResponse, error) {
+func (UnimplementedMessageBoardServer) GetSubscriptionNode(context.Context, *SubscriptionNodeRequest) (*SubscriptionNodeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSubscriptionNode not implemented")
+}
+func (UnimplementedMessageBoardServer) ListTopics(context.Context, *empty.Empty) (*ListTopicsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListTopics not implemented")
 }
 func (UnimplementedMessageBoardServer) GetMessages(context.Context, *GetMessagesRequest) (*GetMessagesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetMessages not implemented")
 }
-func (UnimplementedMessageBoardServer) GetSubscriptionNode(context.Context, *GetSubscriptionNodeRequest) (*GetSubscriptionNodeResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetSubscriptionNode not implemented")
-}
-func (UnimplementedMessageBoardServer) SubscribeTopic(*SubscribeRequest, grpc.ServerStreamingServer[MessageEvent]) error {
+func (UnimplementedMessageBoardServer) SubscribeTopic(*SubscribeTopicRequest, grpc.ServerStreamingServer[MessageEvent]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeTopic not implemented")
 }
 func (UnimplementedMessageBoardServer) mustEmbedUnimplementedMessageBoardServer() {}
@@ -348,8 +368,26 @@ func _MessageBoard_LikeMessage_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MessageBoard_GetSubscriptionNode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubscriptionNodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessageBoardServer).GetSubscriptionNode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessageBoard_GetSubscriptionNode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessageBoardServer).GetSubscriptionNode(ctx, req.(*SubscriptionNodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _MessageBoard_ListTopics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ListTopicsRequest)
+	in := new(empty.Empty)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -361,7 +399,7 @@ func _MessageBoard_ListTopics_Handler(srv interface{}, ctx context.Context, dec 
 		FullMethod: MessageBoard_ListTopics_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MessageBoardServer).ListTopics(ctx, req.(*ListTopicsRequest))
+		return srv.(MessageBoardServer).ListTopics(ctx, req.(*empty.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -384,30 +422,12 @@ func _MessageBoard_GetMessages_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
-func _MessageBoard_GetSubscriptionNode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetSubscriptionNodeRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MessageBoardServer).GetSubscriptionNode(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: MessageBoard_GetSubscriptionNode_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MessageBoardServer).GetSubscriptionNode(ctx, req.(*GetSubscriptionNodeRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _MessageBoard_SubscribeTopic_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(SubscribeRequest)
+	m := new(SubscribeTopicRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(MessageBoardServer).SubscribeTopic(m, &grpc.GenericServerStream[SubscribeRequest, MessageEvent]{ServerStream: stream})
+	return srv.(MessageBoardServer).SubscribeTopic(m, &grpc.GenericServerStream[SubscribeTopicRequest, MessageEvent]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
@@ -445,16 +465,16 @@ var MessageBoard_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _MessageBoard_LikeMessage_Handler,
 		},
 		{
+			MethodName: "GetSubscriptionNode",
+			Handler:    _MessageBoard_GetSubscriptionNode_Handler,
+		},
+		{
 			MethodName: "ListTopics",
 			Handler:    _MessageBoard_ListTopics_Handler,
 		},
 		{
 			MethodName: "GetMessages",
 			Handler:    _MessageBoard_GetMessages_Handler,
-		},
-		{
-			MethodName: "GetSubscriptionNode",
-			Handler:    _MessageBoard_GetSubscriptionNode_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
@@ -468,16 +488,16 @@ var MessageBoard_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	ControlPlane_GetHead_FullMethodName = "/razpravljalnica.ControlPlane/GetHead"
-	ControlPlane_GetTail_FullMethodName = "/razpravljalnica.ControlPlane/GetTail"
+	ControlPlane_GetClusterState_FullMethodName = "/razpravljalnica.ControlPlane/GetClusterState"
 )
 
 // ControlPlaneClient is the client API for ControlPlane service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// Return the the head and the tail node address
 type ControlPlaneClient interface {
-	GetHead(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*NodeInfo, error)
-	GetTail(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*NodeInfo, error)
+	GetClusterState(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*GetClusterStateResponse, error)
 }
 
 type controlPlaneClient struct {
@@ -488,20 +508,10 @@ func NewControlPlaneClient(cc grpc.ClientConnInterface) ControlPlaneClient {
 	return &controlPlaneClient{cc}
 }
 
-func (c *controlPlaneClient) GetHead(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*NodeInfo, error) {
+func (c *controlPlaneClient) GetClusterState(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*GetClusterStateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(NodeInfo)
-	err := c.cc.Invoke(ctx, ControlPlane_GetHead_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *controlPlaneClient) GetTail(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*NodeInfo, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(NodeInfo)
-	err := c.cc.Invoke(ctx, ControlPlane_GetTail_FullMethodName, in, out, cOpts...)
+	out := new(GetClusterStateResponse)
+	err := c.cc.Invoke(ctx, ControlPlane_GetClusterState_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -511,9 +521,10 @@ func (c *controlPlaneClient) GetTail(ctx context.Context, in *empty.Empty, opts 
 // ControlPlaneServer is the server API for ControlPlane service.
 // All implementations must embed UnimplementedControlPlaneServer
 // for forward compatibility.
+//
+// Return the the head and the tail node address
 type ControlPlaneServer interface {
-	GetHead(context.Context, *empty.Empty) (*NodeInfo, error)
-	GetTail(context.Context, *empty.Empty) (*NodeInfo, error)
+	GetClusterState(context.Context, *empty.Empty) (*GetClusterStateResponse, error)
 	mustEmbedUnimplementedControlPlaneServer()
 }
 
@@ -524,11 +535,8 @@ type ControlPlaneServer interface {
 // pointer dereference when methods are called.
 type UnimplementedControlPlaneServer struct{}
 
-func (UnimplementedControlPlaneServer) GetHead(context.Context, *empty.Empty) (*NodeInfo, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetHead not implemented")
-}
-func (UnimplementedControlPlaneServer) GetTail(context.Context, *empty.Empty) (*NodeInfo, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetTail not implemented")
+func (UnimplementedControlPlaneServer) GetClusterState(context.Context, *empty.Empty) (*GetClusterStateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetClusterState not implemented")
 }
 func (UnimplementedControlPlaneServer) mustEmbedUnimplementedControlPlaneServer() {}
 func (UnimplementedControlPlaneServer) testEmbeddedByValue()                      {}
@@ -551,38 +559,20 @@ func RegisterControlPlaneServer(s grpc.ServiceRegistrar, srv ControlPlaneServer)
 	s.RegisterService(&ControlPlane_ServiceDesc, srv)
 }
 
-func _ControlPlane_GetHead_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _ControlPlane_GetClusterState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(empty.Empty)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ControlPlaneServer).GetHead(ctx, in)
+		return srv.(ControlPlaneServer).GetClusterState(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: ControlPlane_GetHead_FullMethodName,
+		FullMethod: ControlPlane_GetClusterState_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ControlPlaneServer).GetHead(ctx, req.(*empty.Empty))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _ControlPlane_GetTail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(empty.Empty)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ControlPlaneServer).GetTail(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ControlPlane_GetTail_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ControlPlaneServer).GetTail(ctx, req.(*empty.Empty))
+		return srv.(ControlPlaneServer).GetClusterState(ctx, req.(*empty.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -595,12 +585,8 @@ var ControlPlane_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*ControlPlaneServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "GetHead",
-			Handler:    _ControlPlane_GetHead_Handler,
-		},
-		{
-			MethodName: "GetTail",
-			Handler:    _ControlPlane_GetTail_Handler,
+			MethodName: "GetClusterState",
+			Handler:    _ControlPlane_GetClusterState_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
