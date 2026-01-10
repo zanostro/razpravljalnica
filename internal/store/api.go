@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 )
@@ -21,8 +22,29 @@ func (s *Store) CreateUser(username string) (User, error) {
 		return User{}, ErrBadRequest
 	}
 
+	// Preveri ali ime že obstaja in dodaj #številko če je potrebno
+	finalUsername := username
+	counter := 1
+
+	for {
+		exists := false
+		for _, existingUser := range s.users {
+			if existingUser.Username == finalUsername {
+				exists = true
+				break
+			}
+		}
+
+		if !exists {
+			break
+		}
+
+		counter++
+		finalUsername = fmt.Sprintf("%s#%d", username, counter)
+	}
+
 	id := s.nextUser()
-	u := User{ID: id, Username: username}
+	u := User{ID: id, Username: finalUsername}
 	s.users[id] = u
 	return u, nil
 }
