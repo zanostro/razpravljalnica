@@ -422,11 +422,12 @@ func main() {
 
 	go func() {
 		for {
-
-			if t != nil && u != nil {
+			if u != nil {
 				reloadTopics()
-				reloadMessages(t, u)
-				client_app.Draw()
+				if t != nil {
+					reloadMessages(t, u)
+					client_app.Draw()
+				}
 			}
 			time.Sleep(1 * time.Second)
 		}
