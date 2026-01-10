@@ -14,7 +14,6 @@ import (
 	pb "github.com/zanostro/razpravljalnica/gen/pb"
 	"github.com/zanostro/razpravljalnica/internal/chain"
 	"github.com/zanostro/razpravljalnica/internal/config"
-	"github.com/zanostro/razpravljalnica/internal/sub"
 )
 
 // ChainServer implements gRPC services for chain replication
@@ -25,7 +24,6 @@ type ChainServer struct {
 
 	chainNode *chain.Node
 	cfg       *config.Config
-	sub       *sub.Manager
 	tokens    map[string]bool // subscription tokens
 }
 
@@ -33,7 +31,6 @@ func NewChainServer(chainNode *chain.Node, cfg *config.Config) *ChainServer {
 	return &ChainServer{
 		chainNode: chainNode,
 		cfg:       cfg,
-		sub:       sub.NewManager(),
 		tokens:    make(map[string]bool),
 	}
 }
@@ -137,12 +134,6 @@ func (s *ChainServer) PostMessage(ctx context.Context, req *pb.PostMessageReques
 	var msg pb.Message
 	proto.Unmarshal(result.Response, &msg)
 
-	// Notify subscribers
-	s.sub.Publish(req.TopicId, &pb.MessageEvent{
-		SequenceNumber: seqNum,
-		Op:             pb.OpType_OP_POST,
-		Message:        &msg,
-	})
 
 	return &msg, nil
 }
@@ -174,11 +165,6 @@ func (s *ChainServer) UpdateMessage(ctx context.Context, req *pb.UpdateMessageRe
 	var msg pb.Message
 	proto.Unmarshal(result.Response, &msg)
 
-	s.sub.Publish(req.TopicId, &pb.MessageEvent{
-		SequenceNumber: seqNum,
-		Op:             pb.OpType_OP_UPDATE,
-		Message:        &msg,
-	})
 
 	return &msg, nil
 }
@@ -207,11 +193,6 @@ func (s *ChainServer) DeleteMessage(ctx context.Context, req *pb.DeleteMessageRe
 		return nil, fmt.Errorf("operation failed: %s", result.ErrorMessage)
 	}
 
-	s.sub.Publish(req.TopicId, &pb.MessageEvent{
-		SequenceNumber: seqNum,
-		Op:             pb.OpType_OP_DELETE,
-		Message:        &pb.Message{Id: req.MessageId, TopicId: req.TopicId},
-	})
 
 	return &emptypb.Empty{}, nil
 }
@@ -242,12 +223,6 @@ func (s *ChainServer) LikeMessage(ctx context.Context, req *pb.LikeMessageReques
 
 	var msg pb.Message
 	proto.Unmarshal(result.Response, &msg)
-
-	s.sub.Publish(req.TopicId, &pb.MessageEvent{
-		SequenceNumber: seqNum,
-		Op:             pb.OpType_OP_LIKE,
-		Message:        &msg,
-	})
 
 	return &msg, nil
 }
@@ -305,7 +280,6 @@ func (s *ChainServer) GetSubscriptionNode(ctx context.Context, req *pb.Subscript
 
 	log.Printf("[HEAD] GetSubscriptionNode for topics: %v", req.TopicId)
 
-	// Use hash of first topic to determine which node handles this subscription
 	var selectedNode *config.NodeConfig
 	if len(req.TopicId) > 0 {
 		hash := fnv.New32a()
@@ -313,11 +287,9 @@ func (s *ChainServer) GetSubscriptionNode(ctx context.Context, req *pb.Subscript
 		nodeIndex := int(hash.Sum32()) % len(s.cfg.Chain.Nodes)
 		selectedNode = &s.cfg.Chain.Nodes[nodeIndex]
 	} else {
-		// Default to head
 		selectedNode = s.cfg.GetHead()
 	}
 
-	// Generate token
 	token := generateToken()
 	s.tokens[token] = true
 
@@ -333,12 +305,11 @@ func (s *ChainServer) GetSubscriptionNode(ctx context.Context, req *pb.Subscript
 func (s *ChainServer) SubscribeTopic(req *pb.SubscribeTopicRequest, stream pb.MessageBoard_SubscribeTopicServer) error {
 	log.Printf("[%s] SubscribeTopic: topics=%v token=%s", s.chainNode.GetNodeID(), req.TopicId, req.SubscribeToken)
 
-	// Validate token (simplified - in production you'd want better validation)
 	if req.SubscribeToken == "" {
 		return fmt.Errorf("invalid subscription token")
 	}
 
-	// Catch-up: send existing messages
+	subMgr := s.chainNode.GetSubManager()
 	for _, tid := range req.TopicId {
 		msgs, err := s.chainNode.GetStore().GetMessages(tid, req.FromMessageId, 1000000)
 		if err != nil {
@@ -346,7 +317,7 @@ func (s *ChainServer) SubscribeTopic(req *pb.SubscribeTopicRequest, stream pb.Me
 		}
 		for _, m := range msgs {
 			ev := &pb.MessageEvent{
-				SequenceNumber: s.sub.NextSeq(),
+				SequenceNumber: subMgr.NextSeq(),
 				Op:             pb.OpType_OP_POST,
 				Message: &pb.Message{
 					Id:      m.ID,
@@ -362,9 +333,8 @@ func (s *ChainServer) SubscribeTopic(req *pb.SubscribeTopicRequest, stream pb.Me
 		}
 	}
 
-	// Live streaming
-	subID, ch := s.sub.Add(req.UserId, req.TopicId)
-	defer s.sub.Remove(subID)
+	subID, ch := subMgr.Add(req.UserId, req.TopicId)
+	defer subMgr.Remove(subID)
 
 	for {
 		select {

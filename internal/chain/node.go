@@ -9,10 +9,12 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/zanostro/razpravljalnica/gen/pb"
 	"github.com/zanostro/razpravljalnica/internal/config"
 	"github.com/zanostro/razpravljalnica/internal/store"
+	"github.com/zanostro/razpravljalnica/internal/sub"
 )
 
 // Node represents a node in the chain replication system
@@ -22,6 +24,7 @@ type Node struct {
 	role          config.NodeRole
 	store         *store.Store
 	successorAddr string
+	subManager    *sub.Manager
 
 	// gRPC client connection to successor (if not TAIL)
 	successorConn   *grpc.ClientConn
@@ -33,7 +36,7 @@ type Node struct {
 }
 
 // NewNode creates a new chain node
-func NewNode(cfg *config.Config, nodeID string, st *store.Store) (*Node, error) {
+func NewNode(cfg *config.Config, nodeID string, st *store.Store, subMgr *sub.Manager) (*Node, error) {
 	nodeCfg := cfg.GetNode(nodeID)
 	if nodeCfg == nil {
 		return nil, fmt.Errorf("node %s not found in config", nodeID)
@@ -44,6 +47,7 @@ func NewNode(cfg *config.Config, nodeID string, st *store.Store) (*Node, error) 
 		nodeID:      nodeID,
 		role:        nodeCfg.Role,
 		store:       st,
+		subManager:  subMgr,
 		pendingAcks: make(map[int64]chan *pb.ChainOperationResult),
 	}
 
@@ -175,6 +179,13 @@ func (n *Node) applyOperation(ctx context.Context, op *pb.ChainOperation) (*pb.C
 		respData, _ := proto.Marshal(resp)
 		result.Response = respData
 
+		n.subManager.Publish(req.TopicId, &pb.MessageEvent{
+			SequenceNumber: op.SequenceNumber,
+			Op:             pb.OpType_OP_POST,
+			Message:        resp,
+			EventAt:        timestamppb.Now(),
+		})
+
 	case "UpdateMessage":
 		var req pb.UpdateMessageRequest
 		if err := proto.Unmarshal(op.Payload, &req); err != nil {
@@ -188,6 +199,13 @@ func (n *Node) applyOperation(ctx context.Context, op *pb.ChainOperation) (*pb.C
 		respData, _ := proto.Marshal(resp)
 		result.Response = respData
 
+		n.subManager.Publish(req.TopicId, &pb.MessageEvent{
+			SequenceNumber: op.SequenceNumber,
+			Op:             pb.OpType_OP_UPDATE,
+			Message:        resp,
+			EventAt:        timestamppb.Now(),
+		})
+
 	case "DeleteMessage":
 		var req pb.DeleteMessageRequest
 		if err := proto.Unmarshal(op.Payload, &req); err != nil {
@@ -197,6 +215,13 @@ func (n *Node) applyOperation(ctx context.Context, op *pb.ChainOperation) (*pb.C
 		if err != nil {
 			return nil, err
 		}
+
+		n.subManager.Publish(req.TopicId, &pb.MessageEvent{
+			SequenceNumber: op.SequenceNumber,
+			Op:             pb.OpType_OP_DELETE,
+			Message:        &pb.Message{Id: req.MessageId, TopicId: req.TopicId},
+			EventAt:        timestamppb.Now(),
+		})
 
 	case "LikeMessage":
 		var req pb.LikeMessageRequest
@@ -210,6 +235,13 @@ func (n *Node) applyOperation(ctx context.Context, op *pb.ChainOperation) (*pb.C
 		resp := n.storeMessageToPb(&msg)
 		respData, _ := proto.Marshal(resp)
 		result.Response = respData
+
+		n.subManager.Publish(req.TopicId, &pb.MessageEvent{
+			SequenceNumber: op.SequenceNumber,
+			Op:             pb.OpType_OP_LIKE,
+			Message:        resp,
+			EventAt:        timestamppb.Now(),
+		})
 
 	default:
 		return nil, fmt.Errorf("unknown operation type: %s", op.OperationType)
@@ -242,4 +274,9 @@ func (n *Node) GetRole() config.NodeRole {
 // GetNodeID returns the node's ID
 func (n *Node) GetNodeID() string {
 	return n.nodeID
+}
+
+// GetSubManager returns the subscription manager
+func (n *Node) GetSubManager() *sub.Manager {
+	return n.subManager
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/zanostro/razpravljalnica/internal/config"
 	"github.com/zanostro/razpravljalnica/internal/server"
 	"github.com/zanostro/razpravljalnica/internal/store"
+	"github.com/zanostro/razpravljalnica/internal/sub"
 )
 
 func main() {
@@ -45,8 +46,11 @@ func main() {
 	// Create store
 	st := store.New()
 
+	// Create subscription manager
+	subMgr := sub.NewManager()
+
 	// Create chain node
-	chainNode, err := chain.NewNode(cfg, *nodeID, st)
+	chainNode, err := chain.NewNode(cfg, *nodeID, st, subMgr)
 	if err != nil {
 		log.Fatalf("Failed to create chain node: %v", err)
 	}
