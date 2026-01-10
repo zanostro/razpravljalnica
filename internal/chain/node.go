@@ -95,12 +95,10 @@ func (n *Node) IsTail() bool {
 	return n.role == config.RoleTail
 }
 
-// ForwardOperation implements ChainReplication service
-// This handles operations forwarded from predecessor nodes
+// ForwardOperation aplicira operacijo lokalno in jo posreduje naprej po verigi
 func (n *Node) ForwardOperation(ctx context.Context, op *pb.ChainOperation) (*pb.ChainOperationResult, error) {
 	log.Printf("[%s] Received operation seq=%d type=%s", n.nodeID, op.SequenceNumber, op.OperationType)
 
-	// Apply operation to local store
 	result, err := n.applyOperation(ctx, op)
 	if err != nil {
 		log.Printf("[%s] Error applying operation: %v", n.nodeID, err)
@@ -111,13 +109,13 @@ func (n *Node) ForwardOperation(ctx context.Context, op *pb.ChainOperation) (*pb
 		}, nil
 	}
 
-	// If this is TAIL, operation is complete - send back result
+	// TAIL: operacija končana, pošlji nazaj rezultat
 	if n.IsTail() {
 		log.Printf("[%s] TAIL node - operation complete, sending ACK", n.nodeID)
 		return result, nil
 	}
 
-	// Otherwise, forward to successor and wait for ACK
+	// Posreduj naslednjemu vozlišču v verigi
 	log.Printf("[%s] Forwarding to successor...", n.nodeID)
 	ack, err := n.successorClient.ForwardOperation(ctx, op)
 	if err != nil {
@@ -132,7 +130,7 @@ func (n *Node) ForwardOperation(ctx context.Context, op *pb.ChainOperation) (*pb
 	return ack, nil
 }
 
-// applyOperation applies the operation to local store
+// applyOperation izvede operacijo v lokalnem store-u in obvesti subscriberje
 func (n *Node) applyOperation(ctx context.Context, op *pb.ChainOperation) (*pb.ChainOperationResult, error) {
 	result := &pb.ChainOperationResult{
 		SequenceNumber: op.SequenceNumber,
@@ -179,6 +177,7 @@ func (n *Node) applyOperation(ctx context.Context, op *pb.ChainOperation) (*pb.C
 		respData, _ := proto.Marshal(resp)
 		result.Response = respData
 
+		// Obvesti lokalne subscriberje o novi objavi
 		n.subManager.Publish(req.TopicId, &pb.MessageEvent{
 			SequenceNumber: op.SequenceNumber,
 			Op:             pb.OpType_OP_POST,
@@ -250,7 +249,6 @@ func (n *Node) applyOperation(ctx context.Context, op *pb.ChainOperation) (*pb.C
 	return result, nil
 }
 
-// Helper to convert store message to pb message
 func (n *Node) storeMessageToPb(msg *store.Message) *pb.Message {
 	return &pb.Message{
 		Id:      msg.ID,

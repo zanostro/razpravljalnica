@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -18,17 +20,18 @@ import (
 )
 
 type UI struct {
-	App            *tview.Application
-	Grid           *tview.Grid
-	Pages          *tview.Pages
-	TopicList      *tview.List
-	SubscribedList *tview.List
-	MessageList    *tview.List
-	PopupMessage   *tview.TextView
-	LikedList      *tview.List
-	MsgForm        *tview.Form
-	MsgEditForm    *tview.Form
-	TopicForm      *tview.Form
+	App                *tview.Application
+	Grid               *tview.Grid
+	Pages              *tview.Pages
+	TopicList          *tview.List
+	SubscribedList     *tview.List
+	MessageList        *tview.List
+	PopupMessage       *tview.TextView
+	LikedList          *tview.List
+	MsgForm            *tview.Form
+	MsgEditForm        *tview.Form
+	TopicForm          *tview.Form
+	SubscriptionEvents *tview.TextView
 }
 
 func prepareUI(client_app *tview.Application) *UI {
@@ -83,25 +86,32 @@ func prepareUI(client_app *tview.Application) *UI {
 	liked_list := tview.NewList().SetSelectedFocusOnly(true)
 	sub_message := tview.NewTextView()
 
+	subscription_events := tview.NewTextView()
+	subscription_events.SetBorder(true).SetTitle(" Subscribed Topics Messages ")
+	subscription_events.SetDynamicColors(true)
+	subscription_events.SetScrollable(true)
+
 	box_grid.AddItem(subscribed_list, 0, 0, 3, 1, 0, 0, false)
 	box_grid.AddItem(topic_list, 0, 1, 3, 3, 0, 0, false)
 	box_grid.AddItem(message_list, 0, 4, 3, 3, 0, 0, false)
 	box_grid.AddItem(sub_message, 3, 4, 1, 3, 0, 0, false)
 	box_grid.AddItem(liked_list, 0, 7, 3, 1, 0, 0, false)
-	box_grid.AddItem(pages, 0, 8, 4, 4, 0, 0, true)
+	box_grid.AddItem(pages, 0, 8, 2, 4, 0, 0, true)
+	box_grid.AddItem(subscription_events, 2, 8, 2, 4, 0, 0, false)
 
 	ui := &UI{
-		App:            client_app,
-		Grid:           box_grid,
-		Pages:          pages,
-		TopicList:      topic_list,
-		SubscribedList: subscribed_list,
-		MessageList:    message_list,
-		PopupMessage:   sub_message,
-		LikedList:      liked_list,
-		MsgForm:        message_form,
-		MsgEditForm:    msg_edit_form,
-		TopicForm:      topic_form,
+		App:                client_app,
+		Grid:               box_grid,
+		Pages:              pages,
+		TopicList:          topic_list,
+		SubscribedList:     subscribed_list,
+		MessageList:        message_list,
+		PopupMessage:       sub_message,
+		LikedList:          liked_list,
+		MsgForm:            message_form,
+		MsgEditForm:        msg_edit_form,
+		TopicForm:          topic_form,
+		SubscriptionEvents: subscription_events,
 	}
 
 	return ui
@@ -155,7 +165,7 @@ func main() {
 
 	// Helper functions that use both HEAD (write) and TAIL (read) clients
 	var t *pb.Topic
-	var reloadMessages func(*pb.Topic, *pb.User) // forward declaration
+	var reloadMessages func(*pb.Topic, *pb.User)
 	var prev_topic *pb.Topic
 
 	reloadMessages = func(topic *pb.Topic, u *pb.User) {
@@ -172,7 +182,7 @@ func main() {
 		}
 		var msg_count int = 0
 		for _, current_msg := range topic_messages.Messages {
-			msg := current_msg // capture for closure
+			msg := current_msg
 
 			if ui.LikedList.GetItemCount() <= msg_count {
 				ui.LikedList.InsertItem(msg_count, strconv.Itoa(int(msg.Likes)), "", 0, func() {})
@@ -207,7 +217,6 @@ func main() {
 						}
 					})
 					ui.MsgEditForm.GetButton(1).SetSelectedFunc(func() {
-						// LIKE on HEAD (write)
 						mbWrite.LikeMessage(ctx, &pb.LikeMessageRequest{
 							TopicId: topic.Id, UserId: u.Id, MessageId: msg.Id})
 						reloadMessages(topic, u)
@@ -223,13 +232,10 @@ func main() {
 		}
 	}
 
-	// shared setup - CREATE USER on HEAD (write)
 	u, err := mbWrite.CreateUser(ctx, &pb.CreateUserRequest{Name: "ana"})
 	if err != nil {
 		log.Fatal("CreateUser:", err)
 	}
-
-	// GET TOPICS from TAIL (read)
 
 	var subscriptions []string
 	var reloadTopics func()
@@ -257,7 +263,7 @@ func main() {
 			if current_topic.Id-1 >= int64(ui.SubscribedList.GetItemCount()) {
 				ui.SubscribedList.InsertItem(int(current_topic.Id)-1, subscriptions[current_topic.Id-1], "", 0, func() {
 					if subscriptions[current_topic.Id-1] == "subscribe" {
-
+						// Pridobi assigned node za naročnino (load balancing)
 						subNode, err := mbWrite.GetSubscriptionNode(ctx, &pb.SubscriptionNodeRequest{
 							UserId:  u.Id,
 							TopicId: []int64{current_topic.Id},
@@ -269,32 +275,98 @@ func main() {
 						ui.SubscribedList.SetItemText(int(current_topic.Id)-1, "subscribed", "")
 						subscriptions[current_topic.Id-1] = "subscribed"
 
+						capturedTopic := current_topic
 						go func() {
-							stream, _ := mbWrite.SubscribeTopic(ctx, &pb.SubscribeTopicRequest{TopicId: []int64{current_topic.Id}, UserId: u.Id, FromMessageId: 0, SubscribeToken: subNode.SubscribeToken})
+							// Poveži se na assigned node
+							conn, err := grpc.Dial(subNode.Node.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+							if err != nil {
+								log.Printf("Subscription connection failed: %v", err)
+								return
+							}
+							defer conn.Close()
+
+							subClient := pb.NewMessageBoardClient(conn)
+
+							// Pridobi zadnji message ID, da preskočimo stara sporočila
+							lastMsgID := int64(0)
+							msgs, _ := mbRead.GetMessages(ctx, &pb.GetMessagesRequest{TopicId: capturedTopic.Id})
+							if len(msgs.Messages) > 0 {
+								lastMsgID = msgs.Messages[len(msgs.Messages)-1].Id
+							}
+
+							stream, err := subClient.SubscribeTopic(ctx, &pb.SubscribeTopicRequest{
+								TopicId:        []int64{capturedTopic.Id},
+								UserId:         u.Id,
+								FromMessageId:  lastMsgID,
+								SubscribeToken: subNode.SubscribeToken,
+							})
+							if err != nil {
+								log.Printf("SubscribeTopic failed: %v", err)
+								return
+							}
+
+							skipCount := 0
 							for {
-								if subscriptions[current_topic.Id-1] == "subscribe" {
+								if subscriptions[capturedTopic.Id-1] == "subscribe" {
 									return
 								}
 								event, err := stream.Recv()
 								if err != nil {
-									log.Fatal(err)
+									log.Printf("Stream error: %v", err)
+									return
 								}
-								var n_msg = fmt.Sprintf("topic=%d user=%d text=%q likes=%d",
-									event.Message.TopicId,
-									event.Message.UserId,
-									event.Message.Text,
-									event.Message.Likes)
-								if ui.PopupMessage.GetText(false) != "" {
-									if ui.PopupMessage.GetText(false) == n_msg {
-										continue
-									} else {
-										ui.PopupMessage.SetText(n_msg)
-										client_app.Draw()
+
+								if event.Message.Id <= lastMsgID {
+									skipCount++
+									continue
+								}
+
+								client_app.QueueUpdateDraw(func() {
+									currentText := ui.SubscriptionEvents.GetText(false)
+
+									switch event.Op {
+									case pb.OpType_OP_POST:
+										eventMsg := fmt.Sprintf("[green][POST][white] %s | msg#%d | user=%d | %q | [yellow]♥%d[white]\n",
+											capturedTopic.Name,
+											event.Message.Id,
+											event.Message.UserId,
+											event.Message.Text,
+											event.Message.Likes)
+										ui.SubscriptionEvents.SetText(currentText + eventMsg)
+										ui.SubscriptionEvents.ScrollToEnd()
+
+									case pb.OpType_OP_UPDATE:
+										eventMsg := fmt.Sprintf("[yellow][UPDATE][white] %s | msg#%d | user=%d | %q | [yellow]♥%d[white]\n",
+											capturedTopic.Name,
+											event.Message.Id,
+											event.Message.UserId,
+											event.Message.Text,
+											event.Message.Likes)
+										ui.SubscriptionEvents.SetText(currentText + eventMsg)
+										ui.SubscriptionEvents.ScrollToEnd()
+
+									case pb.OpType_OP_DELETE:
+										eventMsg := fmt.Sprintf("[red][DELETE][white] %s | msg#%d deleted\n",
+											capturedTopic.Name,
+											event.Message.Id)
+										ui.SubscriptionEvents.SetText(currentText + eventMsg)
+										ui.SubscriptionEvents.ScrollToEnd()
+
+									case pb.OpType_OP_LIKE:
+										// Poišči in posodobi obstoječe sporočilo
+										msgPattern := fmt.Sprintf("msg#%d", event.Message.Id)
+										lines := []string{}
+										for _, line := range strings.Split(currentText, "\n") {
+											if strings.Contains(line, msgPattern) {
+												// Posodobi likes count v tej vrstici
+												re := regexp.MustCompile(`♥\d+`)
+												line = re.ReplaceAllString(line, fmt.Sprintf("♥%d", event.Message.Likes))
+											}
+											lines = append(lines, line)
+										}
+										ui.SubscriptionEvents.SetText(strings.Join(lines, "\n"))
 									}
-								} else {
-									ui.PopupMessage.SetText(n_msg)
-									client_app.Draw()
-								}
+								})
 							}
 						}()
 					} else {
@@ -318,7 +390,6 @@ func main() {
 	ui.TopicForm.GetButton(0).SetSelectedFunc(func() {
 		if item := ui.TopicForm.GetFormItem(0); item != nil {
 			text := item.(*tview.InputField).GetText()
-			// CREATE TOPIC on HEAD (write)
 			top, err := mbWrite.CreateTopic(ctx, &pb.CreateTopicRequest{Name: text})
 			if err != nil {
 				log.Fatal("CreateTopic:", err)
@@ -338,7 +409,6 @@ func main() {
 		if item := ui.MsgForm.GetFormItem(0); item != nil {
 			text := item.(*tview.InputField).GetText()
 			if t != nil {
-				// POST MESSAGE on HEAD (write)
 				_, err := mbWrite.PostMessage(ctx, &pb.PostMessageRequest{TopicId: t.Id, UserId: u.Id, Text: text})
 				if err != nil {
 					log.Fatal("PostMessage:", err)

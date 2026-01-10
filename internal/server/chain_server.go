@@ -35,7 +35,8 @@ func NewChainServer(chainNode *chain.Node, cfg *config.Config) *ChainServer {
 	}
 }
 
-// Write operations - only allowed on HEAD
+// Pisalne operacije - samo na HEAD vozlišču
+
 func (s *ChainServer) CreateUser(ctx context.Context, req *pb.CreateUserRequest) (*pb.User, error) {
 	if !s.chainNode.IsHead() {
 		return nil, fmt.Errorf("write operations only allowed on HEAD node")
@@ -43,23 +44,19 @@ func (s *ChainServer) CreateUser(ctx context.Context, req *pb.CreateUserRequest)
 
 	log.Printf("[HEAD] CreateUser: %s", req.Name)
 
-	// Get sequence number
 	seqNum := s.chainNode.GetStore().GetNextSequenceNumber()
 
-	// Serialize request
 	payload, err := proto.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	// Create operation
 	op := &pb.ChainOperation{
 		SequenceNumber: seqNum,
 		OperationType:  "CreateUser",
 		Payload:        payload,
 	}
 
-	// Apply locally and propagate through chain
 	result, err := s.chainNode.ForwardOperation(ctx, op)
 	if err != nil {
 		return nil, fmt.Errorf("chain operation failed: %w", err)
@@ -69,7 +66,6 @@ func (s *ChainServer) CreateUser(ctx context.Context, req *pb.CreateUserRequest)
 		return nil, fmt.Errorf("operation failed: %s", result.ErrorMessage)
 	}
 
-	// Unmarshal response
 	var user pb.User
 	if err := proto.Unmarshal(result.Response, &user); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
@@ -227,7 +223,8 @@ func (s *ChainServer) LikeMessage(ctx context.Context, req *pb.LikeMessageReques
 	return &msg, nil
 }
 
-// Read operations - only allowed on TAIL
+// Bralne operacije - samo na TAIL vozlišču
+
 func (s *ChainServer) ListTopics(ctx context.Context, req *emptypb.Empty) (*pb.ListTopicsResponse, error) {
 	if !s.chainNode.IsTail() {
 		return nil, fmt.Errorf("read operations only allowed on TAIL node")
@@ -272,7 +269,7 @@ func (s *ChainServer) GetMessages(ctx context.Context, req *pb.GetMessagesReques
 	return &pb.GetMessagesResponse{Messages: pbMsgs}, nil
 }
 
-// Subscription management - load balanced across nodes
+// GetSubscriptionNode izbere vozlišče za naročnino (load balancing)
 func (s *ChainServer) GetSubscriptionNode(ctx context.Context, req *pb.SubscriptionNodeRequest) (*pb.SubscriptionNodeResponse, error) {
 	if !s.chainNode.IsHead() {
 		return nil, fmt.Errorf("subscription requests must go to HEAD")
@@ -280,6 +277,7 @@ func (s *ChainServer) GetSubscriptionNode(ctx context.Context, req *pb.Subscript
 
 	log.Printf("[HEAD] GetSubscriptionNode for topics: %v", req.TopicId)
 
+	// Hash na topic ID določi na katero vozlišče gre naročnina
 	var selectedNode *config.NodeConfig
 	if len(req.TopicId) > 0 {
 		hash := fnv.New32a()
@@ -302,6 +300,7 @@ func (s *ChainServer) GetSubscriptionNode(ctx context.Context, req *pb.Subscript
 	}, nil
 }
 
+// SubscribeTopic pošilja live dogodke subscriberjem na tem vozlišču
 func (s *ChainServer) SubscribeTopic(req *pb.SubscribeTopicRequest, stream pb.MessageBoard_SubscribeTopicServer) error {
 	log.Printf("[%s] SubscribeTopic: topics=%v token=%s", s.chainNode.GetNodeID(), req.TopicId, req.SubscribeToken)
 
@@ -351,7 +350,6 @@ func (s *ChainServer) SubscribeTopic(req *pb.SubscribeTopicRequest, stream pb.Me
 	}
 }
 
-// Control plane
 func (s *ChainServer) GetClusterState(ctx context.Context, req *emptypb.Empty) (*pb.GetClusterStateResponse, error) {
 	head := s.cfg.GetHead()
 	tail := s.cfg.GetTail()
@@ -368,12 +366,10 @@ func (s *ChainServer) GetClusterState(ctx context.Context, req *emptypb.Empty) (
 	}, nil
 }
 
-// Chain replication service implementation
 func (s *ChainServer) ForwardOperation(ctx context.Context, op *pb.ChainOperation) (*pb.ChainOperationResult, error) {
 	return s.chainNode.ForwardOperation(ctx, op)
 }
 
-// Helper function to generate subscription tokens
 func generateToken() string {
 	b := make([]byte, 16)
 	rand.Read(b)
