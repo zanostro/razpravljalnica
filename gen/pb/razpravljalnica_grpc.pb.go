@@ -592,3 +592,107 @@ var ControlPlane_ServiceDesc = grpc.ServiceDesc{
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "razpravljalnica.proto",
 }
+
+const (
+	ChainReplication_ForwardOperation_FullMethodName = "/razpravljalnica.ChainReplication/ForwardOperation"
+)
+
+// ChainReplicationClient is the client API for ChainReplication service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type ChainReplicationClient interface {
+	// Forward operation from one node to the next in chain
+	ForwardOperation(ctx context.Context, in *ChainOperation, opts ...grpc.CallOption) (*ChainOperationResult, error)
+}
+
+type chainReplicationClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewChainReplicationClient(cc grpc.ClientConnInterface) ChainReplicationClient {
+	return &chainReplicationClient{cc}
+}
+
+func (c *chainReplicationClient) ForwardOperation(ctx context.Context, in *ChainOperation, opts ...grpc.CallOption) (*ChainOperationResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ChainOperationResult)
+	err := c.cc.Invoke(ctx, ChainReplication_ForwardOperation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ChainReplicationServer is the server API for ChainReplication service.
+// All implementations must embed UnimplementedChainReplicationServer
+// for forward compatibility.
+type ChainReplicationServer interface {
+	// Forward operation from one node to the next in chain
+	ForwardOperation(context.Context, *ChainOperation) (*ChainOperationResult, error)
+	mustEmbedUnimplementedChainReplicationServer()
+}
+
+// UnimplementedChainReplicationServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedChainReplicationServer struct{}
+
+func (UnimplementedChainReplicationServer) ForwardOperation(context.Context, *ChainOperation) (*ChainOperationResult, error) {
+	return nil, status.Error(codes.Unimplemented, "method ForwardOperation not implemented")
+}
+func (UnimplementedChainReplicationServer) mustEmbedUnimplementedChainReplicationServer() {}
+func (UnimplementedChainReplicationServer) testEmbeddedByValue()                          {}
+
+// UnsafeChainReplicationServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ChainReplicationServer will
+// result in compilation errors.
+type UnsafeChainReplicationServer interface {
+	mustEmbedUnimplementedChainReplicationServer()
+}
+
+func RegisterChainReplicationServer(s grpc.ServiceRegistrar, srv ChainReplicationServer) {
+	// If the following call panics, it indicates UnimplementedChainReplicationServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&ChainReplication_ServiceDesc, srv)
+}
+
+func _ChainReplication_ForwardOperation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ChainOperation)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChainReplicationServer).ForwardOperation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ChainReplication_ForwardOperation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChainReplicationServer).ForwardOperation(ctx, req.(*ChainOperation))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// ChainReplication_ServiceDesc is the grpc.ServiceDesc for ChainReplication service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var ChainReplication_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "razpravljalnica.ChainReplication",
+	HandlerType: (*ChainReplicationServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ForwardOperation",
+			Handler:    _ChainReplication_ForwardOperation_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "razpravljalnica.proto",
+}

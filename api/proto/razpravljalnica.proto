@@ -172,3 +172,25 @@ message GetClusterStateResponse {
   NodeInfo head = 1;
   NodeInfo tail = 2;
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// Internal chain replication service (for node-to-node communication)
+////////////////////////////////////////////////////////////////////////////////
+
+service ChainReplication {
+  // Forward operation from one node to the next in chain
+  rpc ForwardOperation(ChainOperation) returns (ChainOperationResult);
+}
+
+message ChainOperation {
+  int64 sequence_number = 1;
+  string operation_type = 2; // "CreateUser", "CreateTopic", "PostMessage", etc.
+  bytes payload = 3; // Serialized request data
+}
+
+message ChainOperationResult {
+  int64 sequence_number = 1;
+  bool success = 2;
+  string error_message = 3;
+  bytes response = 4; // Serialized response data
+}

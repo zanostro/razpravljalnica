@@ -46,16 +46,36 @@ type Store struct {
 	nextUserID    int64
 	nextTopicID   int64
 	nextMessageID int64
+
+	// Sequence number for chain replication
+	nextSequenceNumber int64
 }
 
 func New() *Store {
 	return &Store{
-		users:         make(map[int64]User),
-		topics:        make(map[int64]Topic),
-		messages:      make(map[MsgKey]*Message),
-		likes:         make(map[[3]int64]struct{}),
-		nextUserID:    1,
-		nextTopicID:   1,
-		nextMessageID: 1,
+		users:              make(map[int64]User),
+		topics:             make(map[int64]Topic),
+		messages:           make(map[MsgKey]*Message),
+		likes:              make(map[[3]int64]struct{}),
+		nextUserID:         1,
+		nextTopicID:        1,
+		nextMessageID:      1,
+		nextSequenceNumber: 1,
 	}
+}
+
+// GetNextSequenceNumber returns a monotonically increasing sequence number
+func (s *Store) GetNextSequenceNumber() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seq := s.nextSequenceNumber
+	s.nextSequenceNumber++
+	return seq
+}
+
+// GetLastSequenceNumber returns the last assigned sequence number
+func (s *Store) GetLastSequenceNumber() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.nextSequenceNumber - 1
 }
