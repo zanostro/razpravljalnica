@@ -22,11 +22,11 @@ import (
 type UI struct {
 	App                *tview.Application
 	Grid               *tview.Grid
+	UserStatus         *tview.TextView
 	Pages              *tview.Pages
 	TopicList          *tview.List
 	SubscribedList     *tview.List
 	MessageList        *tview.List
-	PopupMessage       *tview.TextView
 	LikedList          *tview.List
 	MsgForm            *tview.Form
 	MsgEditForm        *tview.Form
@@ -84,29 +84,29 @@ func prepareUI(client_app *tview.Application) *UI {
 	subscribed_list := tview.NewList()
 	message_list := tview.NewList()
 	liked_list := tview.NewList().SetSelectedFocusOnly(true)
-	sub_message := tview.NewTextView()
+	user_status := tview.NewTextView()
 
 	subscription_events := tview.NewTextView()
 	subscription_events.SetBorder(true).SetTitle(" Subscribed Topics Messages ")
 	subscription_events.SetDynamicColors(true)
 	subscription_events.SetScrollable(true)
 
-	box_grid.AddItem(subscribed_list, 0, 0, 3, 1, 0, 0, false)
-	box_grid.AddItem(topic_list, 0, 1, 3, 3, 0, 0, false)
-	box_grid.AddItem(message_list, 0, 4, 3, 3, 0, 0, false)
-	box_grid.AddItem(sub_message, 3, 4, 1, 3, 0, 0, false)
-	box_grid.AddItem(liked_list, 0, 7, 3, 1, 0, 0, false)
-	box_grid.AddItem(pages, 0, 8, 2, 4, 0, 0, true)
-	box_grid.AddItem(subscription_events, 2, 8, 2, 4, 0, 0, false)
+	box_grid.AddItem(subscribed_list, 0, 0, 7, 1, 0, 0, false)
+	box_grid.AddItem(topic_list, 0, 1, 7, 3, 0, 0, false)
+	box_grid.AddItem(message_list, 0, 4, 7, 3, 0, 0, false)
+	box_grid.AddItem(liked_list, 0, 7, 7, 1, 0, 0, false)
+	box_grid.AddItem(user_status, 0, 8, 1, 4, 0, 0, false)
+	box_grid.AddItem(pages, 1, 8, 4, 4, 0, 0, true)
+	box_grid.AddItem(subscription_events, 5, 8, 2, 4, 0, 0, false)
 
 	ui := &UI{
 		App:                client_app,
 		Grid:               box_grid,
+		UserStatus:         user_status,
 		Pages:              pages,
 		TopicList:          topic_list,
 		SubscribedList:     subscribed_list,
 		MessageList:        message_list,
-		PopupMessage:       sub_message,
 		LikedList:          liked_list,
 		MsgForm:            message_form,
 		MsgEditForm:        msg_edit_form,
@@ -183,6 +183,7 @@ func main() {
 		var msg_count int = 0
 		for _, current_msg := range topic_messages.Messages {
 			msg := current_msg
+			var msg_text = fmt.Sprintf("%d: %s", msg.UserId, msg.Text)
 
 			if ui.LikedList.GetItemCount() <= msg_count {
 				ui.LikedList.InsertItem(msg_count, strconv.Itoa(int(msg.Likes)), "", 0, func() {})
@@ -191,7 +192,7 @@ func main() {
 			}
 
 			if ui.MessageList.GetItemCount() <= msg_count {
-				ui.MessageList.InsertItem(msg_count, msg.Text, "", 0, func() {
+				ui.MessageList.InsertItem(msg_count, msg_text, "", 0, func() {
 					if item := ui.MsgEditForm.GetFormItem(0); item != nil {
 						item.(*tview.InputField).SetText(msg.Text)
 					}
@@ -225,16 +226,20 @@ func main() {
 					ui.Pages.SwitchToPage("Edit_message")
 				})
 			} else {
-				ui.MessageList.SetItemText(msg_count, msg.Text, "")
+				ui.MessageList.SetItemText(msg_count, msg_text, "")
 			}
 
 			msg_count += 1
 		}
 	}
 
-	u, err := mbWrite.CreateUser(ctx, &pb.CreateUserRequest{Name: "ana"})
+	u, err := mbWrite.CreateUser(ctx, &pb.CreateUserRequest{Name: "guest"})
 	if err != nil {
 		log.Fatal("CreateUser:", err)
+	}
+
+	if u != nil && ui != nil {
+		ui.UserStatus.SetText(fmt.Sprintf("Logged in as: %s\nid: %d", u.Name, u.Id))
 	}
 
 	var subscriptions []string
@@ -249,11 +254,6 @@ func main() {
 			subscriptions = append(subscriptions, "subscribe")
 		}
 
-		// ui.SubscribedList.Clear()
-		// ui.TopicList.Clear()
-		// client_app.Suspend(func() {
-		// 	fmt.Printf("all topics:%s\n", get_all_topics.Topics)
-		// })
 		for topic_id := range get_all_topics.Topics {
 			current_topic := get_all_topics.Topics[topic_id]
 			if t == nil {
